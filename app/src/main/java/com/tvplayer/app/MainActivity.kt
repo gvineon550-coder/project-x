@@ -21,7 +21,6 @@ class MainActivity : AppCompatActivity() {
         b.btnRefresh.setOnClickListener { load() }
         b.btnExit.setOnClickListener { exitApp() }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
-        // ПЕРЕХВАТ КНОПКИ "НАЗАД" ПУЛЬТА = ПОЛНЫЙ ВЫХОД
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { exitApp() }
         })

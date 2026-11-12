@@ -59,14 +59,9 @@ class PlayerActivity : AppCompatActivity() {
         b.btnExitApp.setOnClickListener { exitApp() }
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
     }
-    // Полное закрытие приложения
     private fun exitApp() {
-        handler.removeCallbacksAndMessages(null)
-        sleepTimer?.cancel()
-        player?.release()
-        player = null
-        finishAndRemoveTask()
-        android.os.Process.killProcess(android.os.Process.myPid())
+        handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
+        finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid())
     }
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
@@ -91,13 +86,19 @@ class PlayerActivity : AppCompatActivity() {
         b.channelNameOverlay.visibility = View.VISIBLE
         handler.removeCallbacks(hideChannelOverlayRunnable)
         handler.postDelayed(hideChannelOverlayRunnable, 3000)
-        b.progress.visibility = View.VISIBLE
         b.errorLayout.visibility = View.GONE
         retryCount = 0
-        val url = urls.getOrNull(currentIndex) ?: return
+        val channelUrl = urls.getOrNull(currentIndex) ?: return
+        val cached = StreamCache.get(this, channelUrl)
+        if (cached != null) {
+            play(cached)
+            return
+        }
+        b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
-            val direct = StreamResolver.resolve(url)
+            val direct = StreamResolver.resolve(channelUrl)
             if (direct.startsWith("ERROR:")) { handleError(); return@launch }
+            StreamCache.put(this@PlayerActivity, channelUrl, direct)
             play(direct)
         }
     }
@@ -113,7 +114,11 @@ class PlayerActivity : AppCompatActivity() {
             playWhenReady = true; prepare()
             addListener(object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) { updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE }
-                override fun onPlayerError(error: PlaybackException) { super.onPlayerError(error); handleError() }
+                override fun onPlayerError(error: PlaybackException) {
+                    super.onPlayerError(error)
+                    urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
+                    handleError()
+                }
             })
         }
         b.playerView.player = player
