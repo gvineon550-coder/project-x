@@ -5,7 +5,7 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 3 * * 1'   # Каждый понедельник в 03:00 UTC
+    - cron: '0 3 * * 1'
 
 permissions:
   contents: write
@@ -20,26 +20,16 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # ═══════════════════════════════════════════════════
-      # ПРОВЕРКА: нужно ли собирать APK?
-      # (при плановом запуске — только если yt-dlp обновился)
-      # ═══════════════════════════════════════════════════
       - name: "🔍 Проверка версии yt-dlp"
         id: checkytdlp
         run: |
           LATEST=$(curl -s https://pypi.org/pypi/yt-dlp/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])")
           LAST_BUILT=$(cat .last_ytdlp_version 2>/dev/null || echo "none")
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "PyPI (свежая):       $LATEST"
-          echo "Вшита в APK:         $LAST_BUILT"
-          echo "Триггер:             ${{ github.event_name }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "PyPI: $LATEST | Вшита: $LAST_BUILT | Триггер: ${{ github.event_name }}"
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$LATEST" = "$LAST_BUILT" ]; then
-            echo "ℹ️  Плановый запуск, yt-dlp не обновился — пропускаем сборку."
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "$LATEST" > .last_ytdlp_version
-            echo "✅ Собираем новый APK"
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
@@ -61,13 +51,12 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 1: Манифест, build.gradle (buildConfig), XML
+      # ШАГ 1: Манифест, build.gradle, XML
       # ═══════════════════════════════════════════════════
-      - name: "📦 Генерация манифеста и верстки"
+      - name: "📦 Манифест и XML"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           python3 - << 'PYEOF'
-          import re
           path = "app/build.gradle"
           with open(path) as f: txt = f.read()
           if "buildConfig = true" not in txt:
@@ -107,6 +96,8 @@ jobs:
                           <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
                       </intent-filter>
                   </activity>
+                  <activity android:name=".SettingsActivity" android:exported="false"
+                      android:screenOrientation="unspecified" />
                   <activity android:name=".PlayerActivity" android:exported="false"
                       android:screenOrientation="sensorLandscape" />
                   <service android:name=".PlaybackService" android:exported="false"
@@ -231,6 +222,17 @@ jobs:
                       android:focusable="true"
                       android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:id="@+id/btnSettings"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="⚙"
+                      android:textColor="@color/text_dim"
+                      android:textSize="22sp"
+                      android:paddingHorizontal="16dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:background="?attr/selectableItemBackground" />
               </LinearLayout>
               <androidx.recyclerview.widget.RecyclerView
                   android:id="@+id/recycler"
@@ -260,6 +262,128 @@ jobs:
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          EOF
+
+          # НОВЫЙ экран настроек
+          cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg">
+              <LinearLayout
+                  android:id="@+id/topBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="64dp"
+                  android:orientation="horizontal"
+                  android:background="#1A1A1A"
+                  android:gravity="center_vertical"
+                  android:paddingHorizontal="16dp"
+                  app:layout_constraintTop_toTopOf="parent">
+                  <TextView
+                      android:id="@+id/btnBack"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="← Назад"
+                      android:textColor="@color/text"
+                      android:textSize="18sp"
+                      android:textStyle="bold"
+                      android:padding="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Настройки"
+                      android:textColor="@color/text"
+                      android:textSize="22sp"
+                      android:textStyle="bold"
+                      android:paddingStart="16dp" />
+              </LinearLayout>
+              <ScrollView
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:fillViewport="true"
+                  app:layout_constraintTop_toBottomOf="@id/topBar"
+                  app:layout_constraintBottom_toBottomOf="parent"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent">
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="vertical"
+                      android:padding="24dp">
+                      <TextView
+                          android:id="@+id/txtVersion"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="Версия: ..."
+                          android:textColor="@color/text"
+                          android:textSize="20sp"
+                          android:textStyle="bold"
+                          android:paddingBottom="8dp" />
+                      <TextView
+                          android:id="@+id/txtStatus"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text=""
+                          android:textColor="#FFEB3B"
+                          android:textSize="16sp"
+                          android:paddingBottom="24dp" />
+                      <TextView
+                          android:id="@+id/btnCheckUpdate"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="🔄 Проверить обновления"
+                          android:textColor="@color/text"
+                          android:textSize="18sp"
+                          android:textStyle="bold"
+                          android:padding="20dp"
+                          android:focusable="true"
+                          android:clickable="true"
+                          android:background="@drawable/tile_selector"
+                          android:layout_marginBottom="12dp" />
+                      <TextView
+                          android:id="@+id/btnClearCache"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="🗑 Очистить кэш"
+                          android:textColor="@color/text"
+                          android:textSize="18sp"
+                          android:textStyle="bold"
+                          android:padding="20dp"
+                          android:focusable="true"
+                          android:clickable="true"
+                          android:background="@drawable/tile_selector"
+                          android:layout_marginBottom="12dp" />
+                      <TextView
+                          android:id="@+id/btnExitApp"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="✕ Выход из приложения"
+                          android:textColor="#FF8888"
+                          android:textSize="18sp"
+                          android:textStyle="bold"
+                          android:padding="20dp"
+                          android:focusable="true"
+                          android:clickable="true"
+                          android:background="@drawable/tile_selector"
+                          android:layout_marginBottom="24dp" />
+                      <TextView
+                          android:id="@+id/txtAbout"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text=""
+                          android:textColor="@color/text_dim"
+                          android:textSize="14sp"
+                          android:paddingTop="16dp" />
+                  </LinearLayout>
+              </ScrollView>
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
@@ -772,7 +896,7 @@ jobs:
       # ═══════════════════════════════════════════════════
       # ШАГ 4: MainActivity
       # ═══════════════════════════════════════════════════
-      - name: "🧠 MainActivity (с OTA)"
+      - name: "🧠 MainActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -815,10 +939,11 @@ jobs:
                   b.recycler.layoutManager = LinearLayoutManager(this)
                   autoCleanCache()
                   b.btnRefresh.setOnClickListener { load() }
-                  b.btnRefresh.setOnLongClickListener { clearAppCacheManually(); true }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+                  b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
                   b.btnFavFilter.nextFocusDownId = R.id.recycler
                   b.btnRefresh.nextFocusDownId = R.id.recycler
+                  b.btnSettings.nextFocusDownId = R.id.recycler
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() { exitApp() }
                   })
@@ -832,16 +957,6 @@ jobs:
                   if (totalSize > 15 * 1024 * 1024) {
                       cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                   }
-              }
-
-              private fun clearAppCacheManually() {
-                  val imageLoader = coil.Coil.imageLoader(this)
-                  imageLoader.diskCache?.clear()
-                  imageLoader.memoryCache?.clear()
-                  StreamCache.clearAll(this)
-                  cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                  Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
-                  load()
               }
 
               private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
@@ -950,9 +1065,121 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 5: PlayerActivity + финальный коммит
+      # ШАГ 5: SettingsActivity (НОВЫЙ)
       # ═══════════════════════════════════════════════════
-      - name: "🎬 Плеер + коммит"
+      - name: "⚙ SettingsActivity"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
+          package com.tvplayer.app
+          import android.app.AlertDialog
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.FileProvider
+          import androidx.lifecycle.lifecycleScope
+          import coil.Coil
+          import com.tvplayer.app.databinding.ActivitySettingsBinding
+          import kotlinx.coroutines.launch
+          import java.io.File
+
+          class SettingsActivity : AppCompatActivity() {
+              private lateinit var b: ActivitySettingsBinding
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
+
+                  b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
+                  b.txtAbout.text = "Приложение для просмотра VK Live.\nРезолвер: yt-dlp\nПлеер: Media3 (ExoPlayer)\nРепозиторий: ${BuildConfig.GITHUB_REPO}"
+
+                  updateCacheInfo()
+
+                  b.btnBack.setOnClickListener { finish() }
+
+                  b.btnCheckUpdate.setOnClickListener {
+                      b.txtStatus.text = "Проверка обновлений..."
+                      lifecycleScope.launch {
+                          val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
+                          if (info == null) {
+                              b.txtStatus.text = "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})"
+                          } else {
+                              b.txtStatus.text = "🎉 Доступна версия v${info.versionCode}"
+                              AlertDialog.Builder(this@SettingsActivity)
+                                  .setTitle("Доступно обновление v${info.versionCode}")
+                                  .setMessage(info.changelog.take(400))
+                                  .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
+                                  .setNegativeButton("Позже", null)
+                                  .show()
+                          }
+                      }
+                  }
+
+                  b.btnClearCache.setOnClickListener {
+                      val imageLoader = Coil.imageLoader(this)
+                      imageLoader.diskCache?.clear()
+                      imageLoader.memoryCache?.clear()
+                      StreamCache.clearAll(this)
+                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
+                      updateCacheInfo()
+                  }
+
+                  b.btnExitApp.setOnClickListener {
+                      finishAndRemoveTask()
+                      android.os.Process.killProcess(android.os.Process.myPid())
+                  }
+              }
+
+              private fun updateCacheInfo() {
+                  var totalSize = 0L
+                  cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
+                  val sizeMb = totalSize / 1024f / 1024f
+                  b.btnClearCache.text = String.format("🗑 Очистить кэш (%.1f МБ)", sizeMb)
+              }
+
+              private fun startUpdateDownload(url: String) {
+                  Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
+                  lifecycleScope.launch {
+                      val file = UpdateChecker.downloadApk(this@SettingsActivity, url)
+                      if (file == null) {
+                          Toast.makeText(this@SettingsActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
+                          return@launch
+                      }
+                      installApk(file)
+                  }
+              }
+
+              private fun installApk(file: File) {
+                  if (!packageManager.canRequestPackageInstalls()) {
+                      Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
+                      try {
+                          val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                          startActivity(intent)
+                      } catch (_: Exception) {}
+                      return
+                  }
+                  try {
+                      val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      val intent = Intent(Intent.ACTION_VIEW).apply {
+                          setDataAndType(uri, "application/vnd.android.package-archive")
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                      }
+                      startActivity(intent)
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
+                  }
+              }
+          }
+          EOF
+
+      # ═══════════════════════════════════════════════════
+      # ШАГ 6: PlayerActivity + коммит
+      # ═══════════════════════════════════════════════════
+      - name: "🎬 PlayerActivity + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -1216,7 +1443,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "build: v$RUN_NUMBER (yt-dlp version saved)" || echo "no changes"
+          git commit -m "feat: settings screen with manual update check" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
@@ -1257,7 +1484,5 @@ jobs:
             ## Сборка #${{ github.run_number }}
 
             📦 Скачайте APK ниже и установите поверх старой версии.
-
-            yt-dlp версия: **${{ steps.checkytdlp.outputs.skip == 'false' && 'обновлён' || 'без изменений' }}**
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
