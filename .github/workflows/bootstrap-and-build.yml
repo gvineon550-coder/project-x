@@ -13,9 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ═══════════════════════════════════════════════════
-      # 0. ДИАГНОСТИКА ОКРУЖЕНИЯ
-      # ═══════════════════════════════════════════════════
       - name: "🩺 Диагностика окружения"
         run: |
           echo "::group::Версии инструментов"
@@ -55,9 +52,6 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      # ═══════════════════════════════════════════════════
-      # 1. ANDROID SDK + ЛИЦЕНЗИИ
-      # ═══════════════════════════════════════════════════
       - name: "🤖 Android SDK"
         id: setup-android
         uses: android-actions/setup-android@v4
@@ -72,16 +66,13 @@ jobs:
           ACCEPTED=$(grep -c "Accept" /tmp/licenses.log || echo 0)
           echo "✅ Принято/подтверждено лицензий: $ACCEPTED"
 
-      # ═══════════════════════════════════════════════════
-      # 2. ПОЛНАЯ ОЧИСТКА СТАРЫХ ФАЙЛОВ
-      # ═══════════════════════════════════════════════════
       - name: "🧹 Полная очистка старых файлов"
         run: |
           echo "::group::Что удаляем"
           echo "СОХРАНЯЕМ:"
-          echo "  ✓ .git/                           (история репозитория)"
-          echo "  ✓ .github/workflows/bootstrap-and-build.yml  (этот workflow)"
-          echo "  ✓ keystore.jks                    (ключ подписи — для обновлений)"
+          echo "  ✓ .git/"
+          echo "  ✓ .github/workflows/bootstrap-and-build.yml"
+          echo "  ✓ keystore.jks"
           echo ""
           echo "УДАЛЯЕМ ВСЁ ОСТАЛЬНОЕ:"
           echo "::endgroup::"
@@ -140,9 +131,6 @@ jobs:
             echo "- \`.github/workflows/bootstrap-and-build.yml\`"
           } >> $GITHUB_STEP_SUMMARY
 
-      # ═══════════════════════════════════════════════════
-      # 3. ГЕНЕРАЦИЯ ФАЙЛОВ
-      # ═══════════════════════════════════════════════════
       - name: "🏗  Генерация файлов проекта"
         run: |
           set -e
@@ -182,11 +170,10 @@ jobs:
           plugins {
               id("com.android.application") version "8.5.0" apply false
               id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-              id("com.chaquo.python") version "15.0.1" apply false
+              id("com.chaquo.python") version "16.1.0" apply false
           }
           EOF
 
-          # ⚠️ ИСПРАВЛЕНО: abiFilters без listOf и без +=
           cat > app/build.gradle << 'EOF'
           plugins {
               id("com.android.application")
@@ -707,9 +694,6 @@ jobs:
           echo "::endgroup::"
           echo "✅ Все файлы проекта созданы"
 
-      # ═══════════════════════════════════════════════════
-      # 4. ПРОВЕРКА ФАЙЛОВ
-      # ═══════════════════════════════════════════════════
       - name: "🔎 Проверка файлов проекта"
         run: |
           echo "::group::Проверка структуры проекта"
@@ -773,9 +757,6 @@ jobs:
             echo "Все ${#REQUIRED[@]} файлов на месте, ключевые секции в build.gradle присутствуют."
           } >> $GITHUB_STEP_SUMMARY
 
-      # ═══════════════════════════════════════════════════
-      # 5. KEYSTORE
-      # ═══════════════════════════════════════════════════
       - name: "🔑 Keystore"
         run: |
           if [ ! -f "keystore.jks" ]; then
@@ -793,9 +774,6 @@ jobs:
             echo "### 🔑 Keystore найден" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # ═══════════════════════════════════════════════════
-      # 6. СБОРКА APK
-      # ═══════════════════════════════════════════════════
       - name: "🔨 Сборка Release APK"
         id: build
         run: |
@@ -852,9 +830,6 @@ jobs:
           echo "✅ Gradle завершился успешно"
           echo "### ✅ Сборка APK прошла успешно" >> $GITHUB_STEP_SUMMARY
 
-      # ═══════════════════════════════════════════════════
-      # 7. ПРОВЕРКА APK
-      # ═══════════════════════════════════════════════════
       - name: "📦 Проверка APK"
         id: apk
         run: |
@@ -898,9 +873,6 @@ jobs:
             echo "| SHA256 | \`$SHA\` |"
           } >> $GITHUB_STEP_SUMMARY
 
-      # ═══════════════════════════════════════════════════
-      # 8. ПУБЛИКАЦИЯ В RELEASES
-      # ═══════════════════════════════════════════════════
       - name: "🚀 Публикация в Releases"
         if: success()
         uses: softprops/action-gh-release@v2
@@ -944,9 +916,6 @@ jobs:
             echo "https://github.com/${{ github.repository }}/releases/latest"
           } >> $GITHUB_STEP_SUMMARY
 
-      # ═══════════════════════════════════════════════════
-      # 9. ИТОГОВАЯ СВОДКА
-      # ═══════════════════════════════════════════════════
       - name: "📊 Итоговая сводка"
         if: always()
         run: |
