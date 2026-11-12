@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">TV Player</string>
+    <string name="loading">Загрузка каналов…</string>
+    <string name="resolving">Получаем поток…</string>
+    <string name="error_load">Не удалось загрузить список</string>
+    <string name="error_resolve">Не удалось получить поток</string>
+    <string name="retry">Повторить</string>
+    <string name="exit">Выход</string>
+    <string name="refresh">Обновить</string>
+</resources>
