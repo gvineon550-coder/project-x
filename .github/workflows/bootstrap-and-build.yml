@@ -50,11 +50,13 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 1: Манифест, build.gradle, XML
+      # ШАГ 1: Манифест, build.gradle, XML, иконки, сплэш
       # ═══════════════════════════════════════════════════
-      - name: "📦 Манифест и XML"
+      - name: "📦 Манифест, иконки, сплэш"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
+          pip install --quiet Pillow
+
           python3 - << 'PYEOF'
           path = "app/build.gradle"
           with open(path) as f: txt = f.read()
@@ -65,8 +67,86 @@ jobs:
                   'versionName = "1.0"',
                   'versionName = "1.0"\n        buildConfigField "String", "GITHUB_REPO", "\\"${System.getenv(\'GITHUB_REPOSITORY\') ?: \'user/tvplayer\'}\\""'
               )
+          if "core-splashscreen" not in txt:
+              txt = txt.replace(
+                  'implementation("androidx.lifecycle:lifecycle-service:2.8.3")',
+                  'implementation("androidx.lifecycle:lifecycle-service:2.8.3")\n    implementation("androidx.core:core-splashscreen:1.0.1")'
+              )
           with open(path, "w") as f: f.write(txt)
           PYEOF
+
+          python3 - << 'PYEOF'
+          from PIL import Image, ImageDraw
+          import os
+          sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+          for dpi, size in sizes.items():
+              folder = f'app/src/main/res/mipmap-{dpi}'
+              os.makedirs(folder, exist_ok=True)
+              img = Image.new('RGBA', (size, size), (15, 17, 21, 255))
+              draw = ImageDraw.Draw(img)
+              margin = size // 8
+              draw.ellipse([margin, margin, size-margin, size-margin], fill=(37, 99, 235, 255))
+              tx = size // 2 - size // 12
+              ty = size // 2 - size // 6
+              draw.polygon([(tx, ty), (tx, ty + size // 3), (tx + size // 3, size // 2)], fill=(255, 255, 255, 255))
+              img.save(f'{folder}/ic_launcher.png')
+              img.save(f'{folder}/ic_launcher_round.png')
+          print("✅ PNG-иконки сгенерированы")
+          PYEOF
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#2563EB"
+                  android:pathData="M54,20 C72.78,20 88,35.22 88,54 C88,72.78 72.78,88 54,88 C35.22,88 20,72.78 20,54 C20,35.22 35.22,20 54,20 Z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M48,42 L48,66 L68,54 Z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/bg" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/bg" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/res/drawable/splash_logo.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="200dp" android:height="200dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#2563EB"
+                  android:pathData="M54,20 C72.78,20 88,35.22 88,54 C88,72.78 72.78,88 54,88 C35.22,88 20,72.78 20,54 C20,35.22 35.22,20 54,20 Z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M48,42 L48,66 L68,54 Z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml << 'EOF'
+          <resources>
+              <style name="Theme.TVPlayer" parent="Theme.AppCompat.NoActionBar">
+                  <item name="android:windowBackground">@color/bg</item>
+                  <item name="android:statusBarColor">@color/bg</item>
+                  <item name="android:navigationBarColor">@color/bg</item>
+                  <item name="android:textColor">@color/text</item>
+              </style>
+              <style name="Theme.TVPlayer.Splash" parent="Theme.SplashScreen">
+                  <item name="windowSplashScreenBackground">@color/bg</item>
+                  <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+                  <item name="postSplashScreenTheme">@style/Theme.TVPlayer</item>
+              </style>
+          </resources>
+          EOF
 
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -82,12 +162,14 @@ jobs:
               <application
                   android:allowBackup="false"
                   android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
                   android:label="@string/app_name"
                   android:name="com.chaquo.python.android.PyApplication"
                   android:networkSecurityConfig="@xml/network_security_config"
                   android:usesCleartextTraffic="true"
                   android:theme="@style/Theme.TVPlayer">
                   <activity android:name=".MainActivity" android:exported="true"
+                      android:theme="@style/Theme.TVPlayer.Splash"
                       android:screenOrientation="unspecified">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -982,7 +1064,7 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 4: MainActivity (с фиксом exitApp)
+      # ШАГ 4: MainActivity (двойной BACK)
       # ═══════════════════════════════════════════════════
       - name: "🧠 MainActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -999,6 +1081,7 @@ jobs:
           import androidx.activity.OnBackPressedCallback
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.content.FileProvider
+          import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
           import androidx.lifecycle.lifecycleScope
           import androidx.recyclerview.widget.LinearLayoutManager
           import coil.ImageLoader
@@ -1014,6 +1097,7 @@ jobs:
               private var allChannels: List<Channel> = emptyList()
               private var showOnlyFavorites = false
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
+              private var backPressedTime: Long = 0
 
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
@@ -1022,6 +1106,7 @@ jobs:
               }
 
               override fun onCreate(s: Bundle?) {
+                  installSplashScreen()
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
@@ -1032,9 +1117,18 @@ jobs:
                   b.btnFavFilter.nextFocusDownId = R.id.recycler
                   b.btnRefresh.nextFocusDownId = R.id.recycler
                   b.btnSettings.nextFocusDownId = R.id.recycler
+
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-                      override fun handleOnBackPressed() { exitApp() }
+                      override fun handleOnBackPressed() {
+                          if (System.currentTimeMillis() - backPressedTime < 2000) {
+                              exitApp()
+                          } else {
+                              Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
+                              backPressedTime = System.currentTimeMillis()
+                          }
+                      }
                   })
+
                   load()
                   checkForUpdates()
               }
@@ -1047,7 +1141,6 @@ jobs:
                   }
               }
 
-              // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
               private fun exitApp() {
                   finishAffinity()
                   android.os.Process.killProcess(android.os.Process.myPid())
@@ -1157,7 +1250,7 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 5: SettingsActivity (с фиксом exit)
+      # ШАГ 5: SettingsActivity
       # ═══════════════════════════════════════════════════
       - name: "⚙ SettingsActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -1227,7 +1320,6 @@ jobs:
                       updateCacheInfo()
                   }
 
-                  // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
                   b.btnExitApp.setOnClickListener {
                       finishAffinity()
                       android.os.Process.killProcess(android.os.Process.myPid())
@@ -1299,9 +1391,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 6: PlayerActivity (с фиксом фокуса)
+      # ШАГ 6: PlayerActivity (РУЧНАЯ НАВИГАЦИЯ ФОКУСА) + коммит
       # ═══════════════════════════════════════════════════
-      - name: "🎬 PlayerActivity + коммит"
+      - name: "🎬 PlayerActivity (ручной фокус) + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -1364,28 +1456,9 @@ jobs:
                   controller.hide(WindowInsetsCompat.Type.systemBars())
                   controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-                  // НАСТРОЙКА ФОКУСА МЕЖДУ КНОПКАМИ ПЛЕЕРА (чтобы пульт мог до них добраться)
-                  b.btnPlayPause.nextFocusUpId = R.id.btnSleepTimer
-                  b.btnPlayPause.nextFocusLeftId = R.id.btnBack
-                  b.btnPlayPause.nextFocusRightId = R.id.btnQuality
-
-                  b.btnSleepTimer.nextFocusDownId = R.id.btnPlayPause
-                  b.btnSleepTimer.nextFocusLeftId = R.id.btnBack
-                  b.btnSleepTimer.nextFocusRightId = R.id.btnQuality
-
-                  b.btnQuality.nextFocusDownId = R.id.btnAspect
-                  b.btnQuality.nextFocusLeftId = R.id.btnSleepTimer
-                  b.btnQuality.nextFocusUpId = R.id.btnPlayPause
-
-                  b.btnAspect.nextFocusUpId = R.id.btnQuality
-                  b.btnAspect.nextFocusLeftId = R.id.btnPlayPause
-
-                  b.btnBack.nextFocusDownId = R.id.btnPlayPause
-                  b.btnBack.nextFocusRightId = R.id.btnExitApp
-
-                  b.btnExitApp.nextFocusDownId = R.id.btnPlayPause
-                  b.btnExitApp.nextFocusLeftId = R.id.btnBack
-                  b.btnExitApp.nextFocusRightId = R.id.btnSleepTimer
+                  // touchArea не должен забирать фокус
+                  b.touchArea.isFocusable = false
+                  b.touchArea.isFocusableInTouchMode = false
 
                   names = intent.getStringArrayListExtra("names") ?: emptyList()
                   urls = intent.getStringArrayListExtra("urls") ?: emptyList()
@@ -1413,29 +1486,113 @@ jobs:
                   android.os.Process.killProcess(android.os.Process.myPid())
               }
 
+              // ============================================================
+              // РУЧНАЯ НАВИГАЦИЯ ФОКУСА (не полагаемся на nextFocus*Id)
+              // ============================================================
+              private fun handleMenuNavigation(keyCode: Int): Boolean {
+                  val cur = currentFocus ?: run {
+                      b.btnPlayPause.requestFocus()
+                      return true
+                  }
+                  val nextId: Int? = when (cur.id) {
+                      R.id.btnPlayPause -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
+                          KeyEvent.KEYCODE_DPAD_DOWN -> null
+                          else -> null
+                      }
+                      R.id.btnSleepTimer -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnExitApp
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
+                          else -> null
+                      }
+                      R.id.btnBack -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnExitApp
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnExitApp -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnSleepTimer
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnQuality -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnAspect
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnAspect -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnQuality
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      else -> null
+                  }
+                  if (nextId != null) {
+                      findViewById<View>(nextId)?.requestFocus()
+                      return true
+                  }
+                  return false
+              }
+
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                  // 1. Панель каналов открыта — BACK закрывает её и возвращает контролы
+                  // Панель каналов открыта
                   if (b.channelListPanel.visibility == View.VISIBLE) {
-                      if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                      if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                           b.channelListPanel.visibility = View.GONE
                           showControls()
                           return true
                       }
                       return super.dispatchKeyEvent(event)
                   }
-                  // 2. Контролы видны — пусть пульт работает по nextFocus*-Id
+
+                  // Меню плеера показано — РУЧНАЯ обработка навигации
                   if (b.controlsOverlay.visibility == View.VISIBLE) {
-                      return super.dispatchKeyEvent(event)
+                      if (event.action == KeyEvent.ACTION_DOWN) {
+                          when (event.keyCode) {
+                              KeyEvent.KEYCODE_BACK -> {
+                                  hideControlsRunnable.run()
+                                  return true
+                              }
+                              KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                  (currentFocus as? View)?.performClick()
+                                  resetHideTimeout()
+                                  return true
+                              }
+                              KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                              KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                  val handled = handleMenuNavigation(event.keyCode)
+                                  if (handled) {
+                                      resetHideTimeout()
+                                      return true
+                                  }
+                                  return true  // даже если не переключилось — не пропускаем дальше
+                              }
+                          }
+                      }
+                      return true
                   }
-                  // 3. Обычный режим — зэппинг и открытие панели
+
+                  // Меню скрыто — обычный режим
                   if (event.action == KeyEvent.ACTION_DOWN) {
                       when (event.keyCode) {
-                          KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_RIGHT -> { switchChannel(-1); return true }
-                          KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_LEFT -> { switchChannel(1); return true }
+                          KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { switchChannel(-1); return true }
+                          KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { switchChannel(1); return true }
                           KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { showChannelList(); return true }
+                          KeyEvent.KEYCODE_BACK -> { exitApp(); return true }
                       }
                   }
                   return super.dispatchKeyEvent(event)
+              }
+
+              private fun resetHideTimeout() {
+                  handler.removeCallbacks(hideControlsRunnable)
+                  handler.postDelayed(hideControlsRunnable, 5000)
               }
 
               private fun showChannelList() {
@@ -1585,9 +1742,8 @@ jobs:
                   b.rightControls.visibility = View.VISIBLE
                   b.btnSleepTimer.visibility = View.VISIBLE
                   b.leftControls.visibility = View.VISIBLE
-                  // ПРИНУДИТЕЛЬНО ставим фокус на центральную кнопку Play/Pause
-                  b.btnPlayPause.requestFocus()
-                  handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 5000)
+                  b.btnPlayPause.post { b.btnPlayPause.requestFocus() }
+                  resetHideTimeout()
               }
 
               override fun onDestroy() {
@@ -1601,7 +1757,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: exit via finishAffinity, proper player focus navigation" || echo "no changes"
+          git commit -m "fix: manual focus navigation in player, timeout reset on interaction" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
@@ -1642,8 +1798,14 @@ jobs:
             ## Сборка #${{ github.run_number }}
 
             🛠 Исправления:
-            - Кнопка "Выход из приложения" в настройках теперь действительно закрывает всё приложение (не возвращает в главное меню).
-            - В плеере кнопки (Качество, Вписать/Заполнить, Сон, Назад, Выход) теперь можно выбрать пультом.
+            - **Главное:** Навигация пультом по кнопкам плеера теперь работает вручную (не полагаемся на автоматику Android, которая глючит на некоторых приставках).
+            - Таймер скрытия меню сбрасывается при каждом нажатии — успеешь нажать всё.
+            - `touchArea` больше не забирает фокус у кнопок.
+
+            🎨 Новое (из предыдущей сборки, если ещё не обновлялся):
+            - Красивая иконка (синий круг с Play)
+            - Splash-экран при запуске
+            - Двойной BACK для выхода
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
