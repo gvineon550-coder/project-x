@@ -52,7 +52,7 @@ jobs:
       # ═══════════════════════════════════════════════════
       # ШАГ 1: Манифест, build.gradle, XML, иконки, сплэш
       # ═══════════════════════════════════════════════════
-      - name: "📦 Манифест, иконки, сплэш"
+      - name: "📦 Манифест, иконки, сплэш, фоны кнопок"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           pip install --quiet Pillow
@@ -201,6 +201,46 @@ jobs:
           <paths>
               <cache-path name="cache" path="." />
           </paths>
+          EOF
+
+          # ═══ ФОНЫ КНОПОК С ПОДСВЕТКОЙ ПРИ ФОКУСЕ ═══
+
+          # Для текстовых кнопок: чёрный → белый + синяя обводка
+          cat > app/src/main/res/drawable/button_focus_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FFFFFFFF" />
+                      <stroke android:width="3dp" android:color="#FF2563EB" />
+                      <corners android:radius="8dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#AA000000" />
+                      <corners android:radius="8dp" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          # Для Play/Pause: чёрный → синий (белая иконка остаётся видимой)
+          cat > app/src/main/res/drawable/btn_play_pause_focus.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="oval">
+                      <solid android:color="#FF2563EB" />
+                      <stroke android:width="3dp" android:color="#FFFFFFFF" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="oval">
+                      <solid android:color="#00000000" />
+                  </shape>
+              </item>
+          </selector>
           EOF
 
           cat > app/src/main/res/drawable/card_bg.xml << 'EOF'
@@ -557,6 +597,9 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
+          # =====================================================================
+          # ПЛЕЕР: обычный PlayerView + оверлей с подсветкой кнопок при фокусе
+          # =====================================================================
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -564,17 +607,23 @@ jobs:
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:background="#000000">
+
               <androidx.media3.ui.PlayerView
                   android:id="@+id/playerView"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
                   app:use_controller="false"
                   app:resize_mode="zoom"
-                  android:keepScreenOn="true" />
+                  android:keepScreenOn="true"
+                  android:focusable="false" />
+
               <View
                   android:id="@+id/touchArea"
                   android:layout_width="match_parent"
-                  android:layout_height="match_parent" />
+                  android:layout_height="match_parent"
+                  android:focusable="false"
+                  android:focusableInTouchMode="false" />
+
               <LinearLayout
                   android:id="@+id/channelListPanel"
                   android:layout_width="320dp"
@@ -597,6 +646,7 @@ jobs:
                       android:layout_width="match_parent"
                       android:layout_height="match_parent" />
               </LinearLayout>
+
               <TextView
                   android:id="@+id/channelNameOverlay"
                   android:layout_width="wrap_content"
@@ -610,6 +660,7 @@ jobs:
                   android:textSize="24sp"
                   android:textStyle="bold"
                   android:visibility="gone" />
+
               <LinearLayout
                   android:id="@+id/controlsOverlay"
                   android:layout_width="match_parent"
@@ -623,10 +674,13 @@ jobs:
                       android:layout_width="96dp"
                       android:layout_height="96dp"
                       android:src="@android:drawable/ic_media_pause"
+                      android:background="@drawable/btn_play_pause_focus"
+                      android:padding="20dp"
                       app:tint="#FFFFFF"
                       android:clickable="true"
                       android:focusable="true" />
               </LinearLayout>
+
               <LinearLayout
                   android:id="@+id/leftControls"
                   android:layout_width="wrap_content"
@@ -639,7 +693,7 @@ jobs:
                       android:id="@+id/btnBack"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:background="#AA000000"
+                      android:background="@drawable/button_focus_bg"
                       android:paddingHorizontal="16dp"
                       android:paddingVertical="8dp"
                       android:text="← В список"
@@ -653,23 +707,24 @@ jobs:
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
                       android:layout_marginStart="8dp"
-                      android:background="#AA000000"
+                      android:background="@drawable/button_focus_bg"
                       android:paddingHorizontal="16dp"
                       android:paddingVertical="8dp"
                       android:text="✕ Выход"
-                      android:textColor="#FF8888"
+                      android:textColor="#FFFFFF"
                       android:textSize="16sp"
                       android:textStyle="bold"
                       android:clickable="true"
                       android:focusable="true" />
               </LinearLayout>
+
               <TextView
                   android:id="@+id/btnSleepTimer"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="top|center_horizontal"
                   android:layout_margin="24dp"
-                  android:background="#AA000000"
+                  android:background="@drawable/button_focus_bg"
                   android:paddingHorizontal="16dp"
                   android:paddingVertical="8dp"
                   android:text="Сон: Выкл"
@@ -679,6 +734,7 @@ jobs:
                   android:clickable="true"
                   android:focusable="true"
                   android:visibility="gone" />
+
               <LinearLayout
                   android:id="@+id/rightControls"
                   android:layout_width="wrap_content"
@@ -691,7 +747,7 @@ jobs:
                       android:id="@+id/btnQuality"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:background="#AA000000"
+                      android:background="@drawable/button_focus_bg"
                       android:paddingHorizontal="16dp"
                       android:paddingVertical="8dp"
                       android:text="Auto"
@@ -705,7 +761,7 @@ jobs:
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
                       android:layout_marginTop="8dp"
-                      android:background="#AA000000"
+                      android:background="@drawable/button_focus_bg"
                       android:paddingHorizontal="16dp"
                       android:paddingVertical="8dp"
                       android:text="Заполнить"
@@ -715,11 +771,13 @@ jobs:
                       android:clickable="true"
                       android:focusable="true" />
               </LinearLayout>
+
               <ProgressBar
                   android:id="@+id/progress"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="center" />
+
               <LinearLayout
                   android:id="@+id/errorLayout"
                   android:layout_width="wrap_content"
@@ -1391,9 +1449,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 6: PlayerActivity (РУЧНАЯ НАВИГАЦИЯ ФОКУСА) + коммит
+      # ШАГ 6: PlayerActivity (ручная навигация + подсветка) + коммит
       # ═══════════════════════════════════════════════════
-      - name: "🎬 PlayerActivity (ручной фокус) + коммит"
+      - name: "🎬 PlayerActivity (навигация + подсветка) + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -1406,6 +1464,8 @@ jobs:
           import android.os.Looper
           import android.view.KeyEvent
           import android.view.View
+          import android.widget.ImageView
+          import android.widget.TextView
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.view.WindowCompat
           import androidx.core.view.WindowInsetsCompat
@@ -1456,18 +1516,39 @@ jobs:
                   controller.hide(WindowInsetsCompat.Type.systemBars())
                   controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-                  // touchArea не должен забирать фокус
                   b.touchArea.isFocusable = false
                   b.touchArea.isFocusableInTouchMode = false
+
+                  setupFocusHighlight()
 
                   names = intent.getStringArrayListExtra("names") ?: emptyList()
                   urls = intent.getStringArrayListExtra("urls") ?: emptyList()
                   currentIndex = intent.getIntExtra("index", 0)
                   startPlayback()
+
                   b.btnBack.setOnClickListener { finish() }
                   b.btnExitApp.setOnClickListener { exitApp() }
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
-                  b.btnAspect.setOnClickListener { toggleAspect(); showControls() }
+                  b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
+              }
+
+              // ═══════════ ПОДСВЕТКА ФОКУСА ═══════════
+              // Фон кнопок меняется через селектор (button_focus_bg.xml).
+              // Здесь мы меняем ЦВЕТ ТЕКСТА, чтобы он читался на белом фоне при фокусе.
+              private fun setupFocusHighlight() {
+                  listOf(
+                      b.btnQuality,
+                      b.btnSleepTimer,
+                      b.btnAspect,
+                      b.btnBack,
+                      b.btnExitApp
+                  ).forEach { tv ->
+                      tv.setOnFocusChangeListener { _, hasFocus ->
+                          tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
+                      }
+                  }
+                  // Для Play/Pause (ImageView) фон меняется сам через btn_play_pause_focus.xml,
+                  // цвет иконки белый остаётся читаемым на синем и прозрачном фоне.
               }
 
               private fun toggleAspect() {
@@ -1486,9 +1567,7 @@ jobs:
                   android.os.Process.killProcess(android.os.Process.myPid())
               }
 
-              // ============================================================
-              // РУЧНАЯ НАВИГАЦИЯ ФОКУСА (не полагаемся на nextFocus*Id)
-              // ============================================================
+              // ═══════════ РУЧНАЯ НАВИГАЦИЯ ═══════════
               private fun handleMenuNavigation(keyCode: Int): Boolean {
                   val cur = currentFocus ?: run {
                       b.btnPlayPause.requestFocus()
@@ -1499,7 +1578,7 @@ jobs:
                           KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
                           KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
                           KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
-                          KeyEvent.KEYCODE_DPAD_DOWN -> null
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnQuality
                           else -> null
                       }
                       R.id.btnSleepTimer -> when (keyCode) {
@@ -1541,7 +1620,6 @@ jobs:
               }
 
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                  // Панель каналов открыта
                   if (b.channelListPanel.visibility == View.VISIBLE) {
                       if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                           b.channelListPanel.visibility = View.GONE
@@ -1551,7 +1629,6 @@ jobs:
                       return super.dispatchKeyEvent(event)
                   }
 
-                  // Меню плеера показано — РУЧНАЯ обработка навигации
                   if (b.controlsOverlay.visibility == View.VISIBLE) {
                       if (event.action == KeyEvent.ACTION_DOWN) {
                           when (event.keyCode) {
@@ -1567,18 +1644,14 @@ jobs:
                               KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
                               KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                                   val handled = handleMenuNavigation(event.keyCode)
-                                  if (handled) {
-                                      resetHideTimeout()
-                                      return true
-                                  }
-                                  return true  // даже если не переключилось — не пропускаем дальше
+                                  if (handled) { resetHideTimeout(); return true }
+                                  return true
                               }
                           }
                       }
                       return true
                   }
 
-                  // Меню скрыто — обычный режим
                   if (event.action == KeyEvent.ACTION_DOWN) {
                       when (event.keyCode) {
                           KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { switchChannel(-1); return true }
@@ -1667,13 +1740,23 @@ jobs:
                   b.progress.visibility = View.GONE
                   b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
                   showControls()
-                  b.btnQuality.setOnClickListener { showQualityDialog(); showControls() }
-                  b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); showControls() }
+                  b.btnQuality.setOnClickListener { showQualityDialog(); resetHideTimeout() }
+                  b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
                   b.btnPlayPause.setOnClickListener {
-                      player?.let { p -> if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) } else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) } }
-                      showControls()
+                      player?.let { p ->
+                          if (p.isPlaying) {
+                              p.pause()
+                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
+                          } else {
+                              p.play()
+                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                          }
+                      }
+                      resetHideTimeout()
                   }
-                  b.touchArea.setOnClickListener { if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls() }
+                  b.touchArea.setOnClickListener {
+                      if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls()
+                  }
               }
 
               private fun updateQualityButton(tracks: Tracks) {
@@ -1732,7 +1815,7 @@ jobs:
                       }
                       override fun onFinish() { exitApp() }
                   }.start()
-                  showControls()
+                  resetHideTimeout()
               }
 
               private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
@@ -1757,7 +1840,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: manual focus navigation in player, timeout reset on interaction" || echo "no changes"
+          git commit -m "feat: focus highlight for player buttons" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
@@ -1797,15 +1880,10 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛠 Исправления:
-            - **Главное:** Навигация пультом по кнопкам плеера теперь работает вручную (не полагаемся на автоматику Android, которая глючит на некоторых приставках).
-            - Таймер скрытия меню сбрасывается при каждом нажатии — успеешь нажать всё.
-            - `touchArea` больше не забирает фокус у кнопок.
-
-            🎨 Новое (из предыдущей сборки, если ещё не обновлялся):
-            - Красивая иконка (синий круг с Play)
-            - Splash-экран при запуске
-            - Двойной BACK для выхода
+            🎨 **Добавлена визуальная подсветка кнопок в плеере:**
+            - При перемещении фокуса кнопка становится **белой** с синей обводкой, а текст — чёрным.
+            - **Play/Pause** — при фокусе становится синим кругом с белой иконкой.
+            - Раньше кнопки нажимались «наугад» — теперь видно, где фокус.
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
