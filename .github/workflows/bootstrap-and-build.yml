@@ -36,9 +36,9 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 1: XML (Манифест, Верстка + фокус кнопок)
+      # ШАГ 1: XML и Манифест (Верстка)
       # ═══════════════════════════════════════════════════
-      - name: "📦 Генерация XML (с фокусом и кнопкой Выход в плеере)"
+      - name: "📦 Генерация XML (Манифест и верстка)"
         run: |
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -220,7 +220,6 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
-          # Плеер с кнопкой "Выход" (полное закрытие)
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -269,7 +268,6 @@ jobs:
                       android:clickable="true"
                       android:focusable="true" />
               </LinearLayout>
-              <!-- Группа кнопок: Назад + Выход -->
               <LinearLayout
                   android:id="@+id/leftControls"
                   android:layout_width="wrap_content"
@@ -379,9 +377,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 2: Python (Авто-логотипы)
+      # ШАГ 2: Python (Резолвер и Авто-логотипы)
       # ═══════════════════════════════════════════════════
-      - name: "🐍 Обновление Python (Авто-логотипы)"
+      - name: "🐍 Обновление Python"
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
           import yt_dlp
@@ -424,10 +422,52 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin (Список + onBackPressed)
+      # ШАГ 3: Kotlin (Список, Кэш, Модели)
       # ═══════════════════════════════════════════════════
-      - name: "🧠 Обновление Kotlin (Список + Back = Выход)"
+      - name: "🧠 Генерация Kotlin (Список и Кэш)"
         run: |
+          cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
+          package com.tvplayer.app
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONObject
+          import java.util.UUID
+          import java.util.concurrent.TimeUnit
+          data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
+          private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+          private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
+              withContext(Dispatchers.IO) {
+                  val result = mutableListOf<Channel>()
+                  try {
+                      val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
+                      val req = Request.Builder().url(url)
+                          .header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
+                          .header("Origin", "https://live.vkvideo.ru").header("Referer", "https://live.vkvideo.ru/")
+                          .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
+                      client.newCall(req).execute().use { resp ->
+                          val body = resp.body?.string().orEmpty()
+                          if (resp.isSuccessful && body.isNotBlank()) {
+                              val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
+                              if (streams != null) for (i in 0 until streams.length()) {
+                                  val item = streams.optJSONObject(i) ?: continue
+                                  if (!item.optBoolean("is_online", true)) continue
+                                  val blog = item.optJSONObject("blog") ?: continue
+                                  val blogUrl = blog.optString("blogUrl"); if (blogUrl.isBlank()) continue
+                                  val raw = blog.optString("title").ifBlank { blog.optJSONObject("owner")?.optString("displayName").orEmpty() }.ifBlank { blogUrl }
+                                  val name = if (raw.length > 60) raw.take(60) + "…" else raw
+                                  val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null } ?: blog.optString("coverUrl")
+                                  result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
+                              }
+                          }
+                      }
+                  } catch (_: Exception) {}
+                  result + manual
+              }
+          EOF
+
           cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'EOF'
           package com.tvplayer.app
           import com.chaquo.python.Python
@@ -445,6 +485,37 @@ jobs:
                       val m = Python.getInstance().getModule("resolver")
                       m.callAttr("get_thumbnail", url).toString()
                   } catch (_: Exception) { "" }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/StreamCache.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          object StreamCache {
+              private const val PREFS = "stream_cache"
+              // Кэш живет 60 минут
+              private const val TTL_MS = 60 * 60 * 1000L 
+              fun get(context: Context, channelUrl: String): String? {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val entry = prefs.getString(channelUrl, null) ?: return null
+                  val parts = entry.split("|")
+                  if (parts.size != 2) return null
+                  val url = parts[0]
+                  val ts = parts[1].toLongOrNull() ?: return null
+                  if (System.currentTimeMillis() - ts > TTL_MS) {
+                      prefs.edit().remove(channelUrl).apply()
+                      return null
+                  }
+                  return url
+              }
+              fun put(context: Context, channelUrl: String, m3u8: String) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
+              }
+              fun invalidate(context: Context, channelUrl: String) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  prefs.edit().remove(channelUrl).apply()
               }
           }
           EOF
@@ -501,7 +572,6 @@ jobs:
                   b.btnRefresh.setOnClickListener { load() }
                   b.btnExit.setOnClickListener { exitApp() }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
-                  // ПЕРЕХВАТ КНОПКИ "НАЗАД" ПУЛЬТА = ПОЛНЫЙ ВЫХОД
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() { exitApp() }
                   })
@@ -557,9 +627,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 4: Kotlin (Плеер с кнопкой Выход)
+      # ШАГ 4: Kotlin (Плеер) и Сборка
       # ═══════════════════════════════════════════════════
-      - name: "🎬 Плеер (с кнопкой Выход) + сборка"
+      - name: "🎬 Плеер и сборка"
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
@@ -623,14 +693,9 @@ jobs:
                   b.btnExitApp.setOnClickListener { exitApp() }
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
               }
-              // Полное закрытие приложения
               private fun exitApp() {
-                  handler.removeCallbacksAndMessages(null)
-                  sleepTimer?.cancel()
-                  player?.release()
-                  player = null
-                  finishAndRemoveTask()
-                  android.os.Process.killProcess(android.os.Process.myPid())
+                  handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
+                  finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid())
               }
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                   if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
@@ -655,13 +720,19 @@ jobs:
                   b.channelNameOverlay.visibility = View.VISIBLE
                   handler.removeCallbacks(hideChannelOverlayRunnable)
                   handler.postDelayed(hideChannelOverlayRunnable, 3000)
-                  b.progress.visibility = View.VISIBLE
                   b.errorLayout.visibility = View.GONE
                   retryCount = 0
-                  val url = urls.getOrNull(currentIndex) ?: return
+                  val channelUrl = urls.getOrNull(currentIndex) ?: return
+                  val cached = StreamCache.get(this, channelUrl)
+                  if (cached != null) {
+                      play(cached)
+                      return
+                  }
+                  b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
-                      val direct = StreamResolver.resolve(url)
+                      val direct = StreamResolver.resolve(channelUrl)
                       if (direct.startsWith("ERROR:")) { handleError(); return@launch }
+                      StreamCache.put(this@PlayerActivity, channelUrl, direct)
                       play(direct)
                   }
               }
@@ -677,7 +748,11 @@ jobs:
                       playWhenReady = true; prepare()
                       addListener(object : Player.Listener {
                           override fun onTracksChanged(tracks: Tracks) { updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE }
-                          override fun onPlayerError(error: PlaybackException) { super.onPlayerError(error); handleError() }
+                          override fun onPlayerError(error: PlaybackException) {
+                              super.onPlayerError(error)
+                              urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
+                              handleError()
+                          }
                       })
                   }
                   b.playerView.player = player
@@ -765,12 +840,9 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: back key exits app, exit button in player" || echo "no changes"
+          git commit -m "feat: 60-min stream caching, all features" || echo "no changes"
           git push || echo "push failed"
 
-      # ═══════════════════════════════════════════════════
-      # СБОРКА И РЕЛИЗ
-      # ═══════════════════════════════════════════════════
       - name: "🔨 Build APK"
         id: build
         run: |
@@ -779,10 +851,7 @@ jobs:
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "─── Что упало ───"
-            grep -A 20 "What went wrong" /tmp/gradle_build.log | head -25
-            tail -50 /tmp/gradle_build.log
-            exit 1
+            echo "─── Что упало ───"; grep -A 20 "What went wrong" /tmp/gradle_build.log | head -25; tail -50 /tmp/gradle_build.log; exit 1
           fi
           echo "✅ Gradle OK"
 
