@@ -36,11 +36,226 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ПАТЧИ: Убираем "Программа отсутствует"
+      # ПОЛНЫЙ ПАТЧ: И плеер, и качество, и список
       # ═══════════════════════════════════════════════════
-      - name: "🎨 Очистка интерфейса каналов"
+      - name: "🎨 Применение всех правок (Плеер + Список)"
         run: |
-          # 1. Карточка канала без лишнего текста
+          # 1. ИСПРАВЛЕННЫЙ resolver.py (ищет Master-плейлист со всеми качествами)
+          cat > app/src/main/python/resolver.py << 'EOF'
+          import yt_dlp
+          HEADERS = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Referer": "https://vk.com/",
+              "Origin":  "https://vk.com",
+          }
+          def resolve(url):
+              try:
+                  opts = {
+                      "quiet": True, "no_warnings": True, "skip_download": True,
+                      "http_headers": HEADERS,
+                  }
+                  with yt_dlp.YoutubeDL(opts) as ydl:
+                      info = ydl.extract_info(url, download=False)
+                  
+                  if info.get("url") and ".m3u8" in info["url"]:
+                      return info["url"]
+                      
+                  formats = info.get("formats", [])
+                  for f in formats:
+                      if f.get("protocol") == "m3u8":
+                          u = f.get("url", "")
+                          if "master" in u or "index.m3u8" in u:
+                              return u
+                              
+                  best = None
+                  max_h = -1
+                  for f in formats:
+                      if f.get("protocol") == "m3u8":
+                          h = f.get("height") or 0
+                          if h > max_h:
+                              max_h = h
+                              best = f
+                  if best: return best["url"]
+                  return info.get("url") or "ERROR: no m3u8 found"
+              except Exception as e:
+                  return "ERROR: " + str(e)
+          EOF
+
+          # 2. activity_player.xml (Кнопка качества в углу + скрытие панелей)
+          cat > app/src/main/res/layout/activity_player.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="#000000">
+              
+              <androidx.media3.ui.PlayerView
+                  android:id="@+id/playerView"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  app:controller_show_timeout_ms="2000"
+                  app:show_buffering="when_playing"
+                  app:use_controller="true"
+                  app:resize_mode="zoom"
+                  android:keepScreenOn="true" />
+                  
+              <TextView
+                  android:id="@+id/btnQuality"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|end"
+                  android:layout_margin="24dp"
+                  android:background="#AA000000"
+                  android:paddingHorizontal="16dp"
+                  android:paddingVertical="8dp"
+                  android:text="Auto"
+                  android:textColor="#FFFFFF"
+                  android:textSize="16sp"
+                  android:textStyle="bold"
+                  android:clickable="true"
+                  android:focusable="true" />
+                  
+              <ProgressBar
+                  android:id="@+id/progress"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="center" />
+                  
+              <TextView
+                  android:id="@+id/error"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="center"
+                  android:padding="24dp"
+                  android:textColor="#FFAAAAAA"
+                  android:visibility="gone" />
+          </FrameLayout>
+          EOF
+
+          # 3. PlayerActivity.kt (Полный экран + Выбор качества)
+          cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
+          package com.tvplayer.app
+
+          import android.app.AlertDialog
+          import android.os.Bundle
+          import android.view.View
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.view.WindowCompat
+          import androidx.core.view.WindowInsetsCompat
+          import androidx.core.view.WindowInsetsControllerCompat
+          import androidx.lifecycle.lifecycleScope
+          import androidx.media3.common.C
+          import androidx.media3.common.MediaItem
+          import androidx.media3.common.Player
+          import androidx.media3.common.TrackSelectionOverride
+          import androidx.media3.common.Tracks
+          import androidx.media3.datasource.DefaultHttpDataSource
+          import androidx.media3.exoplayer.ExoPlayer
+          import androidx.media3.exoplayer.hls.HlsMediaSource
+          import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+          import com.tvplayer.app.databinding.ActivityPlayerBinding
+          import kotlinx.coroutines.launch
+
+          class PlayerActivity : AppCompatActivity() {
+              private lateinit var b: ActivityPlayerBinding
+              private var player: ExoPlayer? = null
+              private lateinit var trackSelector: DefaultTrackSelector
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  b = ActivityPlayerBinding.inflate(layoutInflater)
+                  setContentView(b.root)
+                  
+                  // Включаем полноэкранный режим (скрываем системные панели)
+                  WindowCompat.setDecorFitsSystemWindows(window, false)
+                  val controller = WindowInsetsControllerCompat(window, window.decorView)
+                  controller.hide(WindowInsetsCompat.Type.systemBars())
+                  controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+                  val url = intent.getStringExtra("url").orEmpty()
+                  b.progress.visibility = View.VISIBLE
+
+                  lifecycleScope.launch {
+                      val direct = StreamResolver.resolve(url)
+                      if (direct.startsWith("ERROR:")) {
+                          b.progress.visibility = View.GONE
+                          b.error.text = direct
+                          b.error.visibility = View.VISIBLE
+                          return@launch
+                      }
+                      play(direct)
+                  }
+              }
+
+              private fun play(m3u8: String) {
+                  val http = DefaultHttpDataSource.Factory()
+                      .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                      .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
+
+                  trackSelector = DefaultTrackSelector(this)
+                  player = ExoPlayer.Builder(this)
+                      .setTrackSelector(trackSelector)
+                      .build().apply {
+                          setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
+                          playWhenReady = true
+                          prepare()
+                          addListener(object : Player.Listener {
+                              override fun onTracksChanged(tracks: Tracks) {
+                                  updateQualityButton(tracks)
+                              }
+                          })
+                      }
+                  b.playerView.player = player
+                  b.progress.visibility = View.GONE
+                  b.btnQuality.setOnClickListener { showQualityDialog() }
+              }
+
+              private fun updateQualityButton(tracks: Tracks) {
+                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                  val selectedIndex = (0 until videoGroup.length).firstOrNull { videoGroup.isTrackSelected(it) } ?: return
+                  val format = videoGroup.getTrackFormat(selectedIndex)
+                  b.btnQuality.text = if (format.height > 0) "${format.height}p" else "Auto"
+              }
+
+              private fun showQualityDialog() {
+                  val p = player ?: return
+                  val tracks = p.currentTracks
+                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                  val qualities = mutableListOf<String>()
+                  qualities.add("Авто (Auto)")
+                  val formats = mutableListOf<androidx.media3.common.Format>()
+                  for (i in 0 until videoGroup.length) {
+                      val format = videoGroup.getTrackFormat(i)
+                      val text = if (format.height > 0) "${format.height}p (${format.bitrate / 1000} kbps)" else "Track $i"
+                      qualities.add(text)
+                      formats.add(format)
+                  }
+                  AlertDialog.Builder(this).setTitle("Качество видео").setItems(qualities.toTypedArray()) { _, which ->
+                      if (which == 0) {
+                          trackSelector.parameters = trackSelector.buildUponParameters()
+                              .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                              .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                              .build()
+                      } else {
+                          trackSelector.parameters = trackSelector.buildUponParameters()
+                              .setOverrideForType(TrackSelectionOverride(videoGroup.getMediaTrackGroup(), which - 1))
+                              .build()
+                      }
+                  }.show()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  player?.release()
+                  player = null
+                  // ВАЖНО: здесь НЕТ killProcess, чтобы приложение не закрывалось при нажатии "Назад"
+              }
+          }
+          EOF
+
+          # 4. item_channel.xml (Список, без лишнего текста)
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -54,7 +269,6 @@ jobs:
               android:clickable="true"
               android:layout_marginBottom="4dp">
 
-              <!-- Квадратный логотип -->
               <ImageView
                   android:id="@+id/logo"
                   android:layout_width="80dp"
@@ -62,7 +276,6 @@ jobs:
                   android:scaleType="centerCrop"
                   android:background="#222222" />
 
-              <!-- Только название, выровненное по центру -->
               <TextView
                   android:id="@+id/name"
                   android:layout_width="0dp"
@@ -79,7 +292,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 2. Главный экран (остается без изменений, копируем для надежности)
+          # 5. activity_main.xml (Темная шапка)
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <androidx.constraintlayout.widget.ConstraintLayout
@@ -89,7 +302,6 @@ jobs:
               android:layout_height="match_parent"
               android:background="@color/bg">
 
-              <!-- Верхняя панель -->
               <LinearLayout
                   android:id="@+id/topBar"
                   android:layout_width="match_parent"
@@ -165,7 +377,7 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
-          # 3. MainActivity (без изменений)
+          # 6. MainActivity.kt (Список + автофокус)
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Intent
@@ -233,7 +445,7 @@ jobs:
           }
           EOF
 
-          # 4. ChannelAdapter: убираем ссылку на subtitle
+          # 7. ChannelAdapter.kt (Без subtitle)
           cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
           package com.tvplayer.app
           import android.view.*
@@ -256,7 +468,6 @@ jobs:
               override fun onBindViewHolder(h: VH, pos: Int) {
                   val ch = items[pos]
                   h.name.text = ch.name
-                  
                   if (ch.logo.isNotBlank()) {
                       h.logo.load(ch.logo) {
                           crossfade(true)
@@ -266,7 +477,6 @@ jobs:
                   } else {
                       h.logo.setImageResource(android.R.color.darker_gray)
                   }
-                  
                   h.itemView.setOnClickListener { onClick(ch) }
               }
               override fun getItemCount() = items.size
@@ -276,7 +486,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "style: remove subtitle from channel list" || echo "no changes"
+          git commit -m "fix: full player quality patch, fullscreen and list ui" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
