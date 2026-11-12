@@ -87,7 +87,6 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Удаление"
-          # Папки
           for d in app build .gradle gradle .idea; do
             if [ -d "$d" ]; then
               rm -rf "$d"
@@ -95,7 +94,6 @@ jobs:
             fi
           done
 
-          # Файлы в корне
           for f in settings.gradle build.gradle gradle.properties local.properties \
                    gradlew gradlew.bat gradle.properties.bak app.properties; do
             if [ -e "$f" ]; then
@@ -104,21 +102,18 @@ jobs:
             fi
           done
 
-          # Старые workflow (все, кроме нашего)
           if [ -d ".github/workflows" ]; then
             find .github/workflows -maxdepth 1 -type f ! -name "bootstrap-and-build.yml" -delete 2>/dev/null || true
             echo "  🗑 Старые workflow удалены"
           fi
 
-          # Проверяем, что keystore сохранён
           if [ -f keystore.jks ]; then
-            echo "  🔑 Сохранён: keystore.jks (нужен для обновлений поверх старой версии)"
+            echo "  🔑 Сохранён: keystore.jks"
           else
             echo "  ℹ️  keystore.jks отсутствует — будет сгенерирован заново"
           fi
           echo "::endgroup::"
 
-          # Что осталось
           echo "::group::Содержимое репозитория после очистки"
           ls -la
           echo ""
@@ -126,7 +121,6 @@ jobs:
           ls -la .github/workflows 2>/dev/null || echo "пусто"
           echo "::endgroup::"
 
-          # Коммитим очистку, чтобы состояние было чистым и на следующих запусках
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
@@ -147,7 +141,7 @@ jobs:
           } >> $GITHUB_STEP_SUMMARY
 
       # ═══════════════════════════════════════════════════
-      # 3. ГЕНЕРАЦИЯ ФАЙЛОВ (всегда, после очистки)
+      # 3. ГЕНЕРАЦИЯ ФАЙЛОВ
       # ═══════════════════════════════════════════════════
       - name: "🏗  Генерация файлов проекта"
         run: |
@@ -192,6 +186,7 @@ jobs:
           }
           EOF
 
+          # ⚠️ ИСПРАВЛЕНО: abiFilters без listOf и без +=
           cat > app/build.gradle << 'EOF'
           plugins {
               id("com.android.application")
@@ -210,7 +205,7 @@ jobs:
                   targetSdk = 34
                   versionCode = 1
                   versionName = "1.0"
-                  ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+                  ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
               }
               signingConfigs {
                   create("release") {
