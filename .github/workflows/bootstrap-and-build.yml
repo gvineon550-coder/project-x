@@ -14,7 +14,7 @@ jobs:
 
     steps:
       # ═══════════════════════════════════════════════════
-      # 0. ДИАГНОСТИКА ОКРУЖЕНИЯ (всегда видна в логе)
+      # 0. ДИАГНОСТИКА ОКРУЖЕНИЯ
       # ═══════════════════════════════════════════════════
       - name: "🩺 Диагностика окружения"
         run: |
@@ -33,6 +33,9 @@ jobs:
           echo "── Android SDK ──"
           echo "ANDROID_HOME=$ANDROID_HOME"
           ls -1 "$ANDROID_HOME" 2>/dev/null || echo "❌ ANDROID_HOME пуст"
+          echo ""
+          echo "── NDK (если есть) ──"
+          ls -1 "$ANDROID_HOME/ndk" 2>/dev/null || echo "NDK не установлен"
           echo ""
           echo "── Свободное место ──"
           df -h / | tail -1
@@ -56,6 +59,7 @@ jobs:
       # 1. ANDROID SDK + ЛИЦЕНЗИИ
       # ═══════════════════════════════════════════════════
       - name: "🤖 Android SDK"
+        id: setup-android
         uses: android-actions/setup-android@v4
         with:
           packages: ''
@@ -63,38 +67,89 @@ jobs:
 
       - name: "📜 Принятие лицензий SDK"
         run: |
-          echo "Принимаем лицензии (это ожидаемо долгий шаг)..."
+          echo "Принимаем лицензии..."
           yes | sdkmanager --licenses > /tmp/licenses.log 2>&1 || true
           ACCEPTED=$(grep -c "Accept" /tmp/licenses.log || echo 0)
           echo "✅ Принято/подтверждено лицензий: $ACCEPTED"
-          if grep -q "Error" /tmp/licenses.log; then
-            echo "::warning::sdkmanager сообщил об ошибке (не критично, идём дальше)"
-            tail -5 /tmp/licenses.log
-          fi
 
       # ═══════════════════════════════════════════════════
-      # 2. ОПРЕДЕЛЯЕМ, ЕСТЬ ЛИ УЖЕ ПРОЕКТ
+      # 2. ПОЛНАЯ ОЧИСТКА СТАРЫХ ФАЙЛОВ
       # ═══════════════════════════════════════════════════
-      - name: "🔍 Проверка существующего проекта"
-        id: detect
+      - name: "🧹 Полная очистка старых файлов"
         run: |
-          if [ -f "app/build.gradle" ] && [ -f "settings.gradle" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "ℹ️  Проект уже есть — генерация пропускается"
-            echo "### ℹ️ Проект уже существует" >> $GITHUB_STEP_SUMMARY
-            echo "Файлы \`app/build.gradle\` и \`settings.gradle\` найдены — bootstrap пропускается." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "🆕 Проекта нет — генерируем все файлы с нуля"
-            echo "### 🆕 Первый запуск: генерация проекта" >> $GITHUB_STEP_SUMMARY
-            echo "Все файлы проекта будут созданы и закоммичены в репозиторий." >> $GITHUB_STEP_SUMMARY
+          echo "::group::Что удаляем"
+          echo "СОХРАНЯЕМ:"
+          echo "  ✓ .git/                           (история репозитория)"
+          echo "  ✓ .github/workflows/bootstrap-and-build.yml  (этот workflow)"
+          echo "  ✓ keystore.jks                    (ключ подписи — для обновлений)"
+          echo ""
+          echo "УДАЛЯЕМ ВСЁ ОСТАЛЬНОЕ:"
+          echo "::endgroup::"
+
+          echo "::group::Удаление"
+          # Папки
+          for d in app build .gradle gradle .idea; do
+            if [ -d "$d" ]; then
+              rm -rf "$d"
+              echo "  🗑 Удалено: $d/"
+            fi
+          done
+
+          # Файлы в корне
+          for f in settings.gradle build.gradle gradle.properties local.properties \
+                   gradlew gradlew.bat gradle.properties.bak app.properties; do
+            if [ -e "$f" ]; then
+              rm -f "$f"
+              echo "  🗑 Удалено: $f"
+            fi
+          done
+
+          # Старые workflow (все, кроме нашего)
+          if [ -d ".github/workflows" ]; then
+            find .github/workflows -maxdepth 1 -type f ! -name "bootstrap-and-build.yml" -delete 2>/dev/null || true
+            echo "  🗑 Старые workflow удалены"
           fi
 
+          # Проверяем, что keystore сохранён
+          if [ -f keystore.jks ]; then
+            echo "  🔑 Сохранён: keystore.jks (нужен для обновлений поверх старой версии)"
+          else
+            echo "  ℹ️  keystore.jks отсутствует — будет сгенерирован заново"
+          fi
+          echo "::endgroup::"
+
+          # Что осталось
+          echo "::group::Содержимое репозитория после очистки"
+          ls -la
+          echo ""
+          echo "── .github/workflows ──"
+          ls -la .github/workflows 2>/dev/null || echo "пусто"
+          echo "::endgroup::"
+
+          # Коммитим очистку, чтобы состояние было чистым и на следующих запусках
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "ℹ️  Нечего очищать — репозиторий уже чист"
+          else
+            echo "💾 Коммитим очистку..."
+            git commit -m "cleanup: remove old files before rebuild"
+            git push || echo "::warning::git push не удался (не критично)"
+          fi
+
+          {
+            echo "### 🧹 Очистка выполнена"
+            echo ""
+            echo "Удалены старые файлы проекта. Сохранены:"
+            echo "- \`keystore.jks\` (для обновлений)"
+            echo "- \`.github/workflows/bootstrap-and-build.yml\`"
+          } >> $GITHUB_STEP_SUMMARY
+
       # ═══════════════════════════════════════════════════
-      # 3. ГЕНЕРАЦИЯ ФАЙЛОВ (только первый запуск)
+      # 3. ГЕНЕРАЦИЯ ФАЙЛОВ (всегда, после очистки)
       # ═══════════════════════════════════════════════════
       - name: "🏗  Генерация файлов проекта"
-        if: steps.detect.outputs.exists == 'false'
         run: |
           set -e
           echo "::group::Создание структуры папок"
@@ -147,6 +202,8 @@ jobs:
           android {
               namespace = "com.tvplayer.app"
               compileSdk = 34
+              ndkVersion = "26.1.10909125"
+
               defaultConfig {
                   applicationId = "com.tvplayer.app"
                   minSdk = 24
@@ -183,7 +240,7 @@ jobs:
           chaquopy {
               defaultConfig {
                   version = "3.11"
-                  pip { install("yt-dlp") }
+                  pip { install("yt-dlp==2024.12.13") }
               }
           }
 
@@ -255,7 +312,7 @@ jobs:
           EOF
 
           cat > app/src/main/assets/requirements.txt << 'EOF'
-          yt-dlp
+          yt-dlp==2024.12.13
           EOF
 
           cat > app/src/main/python/resolver.py << 'EOF'
@@ -650,13 +707,13 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "bootstrap: initial project files" || echo "ℹ️  Нечего коммитить"
-          git push || echo "::warning::git push не выполнен (возможно, нет изменений)"
+          git commit -m "bootstrap: generate project files" || echo "ℹ️  Нечего коммитить"
+          git push || echo "::warning::git push не выполнен"
           echo "::endgroup::"
           echo "✅ Все файлы проекта созданы"
 
       # ═══════════════════════════════════════════════════
-      # 4. ПРОВЕРКА, ЧТО ВСЕ КРИТИЧНЫЕ ФАЙЛЫ НА МЕСТЕ
+      # 4. ПРОВЕРКА ФАЙЛОВ
       # ═══════════════════════════════════════════════════
       - name: "🔎 Проверка файлов проекта"
         run: |
@@ -690,31 +747,27 @@ jobs:
             else
               echo "  ❌ $f — ОТСУТСТВУЕТ"
               MISSING+=("$f")
-              echo "::error title=Отсутствует файл::$f не найден. Проект неполный."
+              echo "::error title=Отсутствует файл::$f не найден."
             fi
           done
           echo "::endgroup::"
 
           if [ ${#MISSING[@]} -gt 0 ]; then
-            echo "::error::Не хватает ${#MISSING[@]} файлов — сборка невозможна."
+            echo "::error::Не хватает ${#MISSING[@]} файлов."
             {
               echo "### ❌ Проверка файлов провалена"
               echo ""
-              echo "Отсутствуют:"
               for f in "${MISSING[@]}"; do echo "- \`$f\`"; done
-              echo ""
-              echo "**Решение:** удали \`app/build.gradle\` и \`settings.gradle\`, перезапусти workflow — генерация пройдёт заново."
             } >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
-          # Проверяем содержимое build.gradle на ключевые секции
-          for section in "chaquopy" "signingConfigs" "media3-exoplayer"; do
+          for section in "chaquopy" "signingConfigs" "media3-exoplayer" "ndkVersion"; do
             if grep -q "$section" app/build.gradle; then
               echo "  ✅ build.gradle содержит '$section'"
             else
               echo "  ❌ build.gradle НЕ содержит '$section'"
-              echo "::error::app/build.gradle не содержит ключевую секцию '$section'"
+              echo "::error::app/build.gradle не содержит '$section'"
               exit 1
             fi
           done
@@ -722,7 +775,7 @@ jobs:
           {
             echo "### ✅ Проверка файлов пройдена"
             echo ""
-            echo "Все ${#REQUIRED[@]} критичных файлов на месте. Ключевые секции в build.gradle присутствуют."
+            echo "Все ${#REQUIRED[@]} файлов на месте, ключевые секции в build.gradle присутствуют."
           } >> $GITHUB_STEP_SUMMARY
 
       # ═══════════════════════════════════════════════════
@@ -738,16 +791,12 @@ jobs:
               -dname "CN=TVPlayer, OU=Dev, O=Dev, L=City, S=State, C=RU"
             git add keystore.jks
             git commit -m "add keystore" || true
-            git push || echo "::warning::push keystore не удался (не критично для этой сборки)"
+            git push || echo "::warning::push keystore не удался"
             echo "### 🔑 Keystore создан" >> $GITHUB_STEP_SUMMARY
-            echo "Сгенерирован новый ключ подписи \`keystore.jks\` (пароль \`tvplayer123\`)." >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ keystore.jks уже существует — используем его"
+            echo "✅ keystore.jks уже существует"
             echo "### 🔑 Keystore найден" >> $GITHUB_STEP_SUMMARY
-            echo "Используем существующий \`keystore.jks\`." >> $GITHUB_STEP_SUMMARY
           fi
-          echo "Отпечаток:"
-          keytool -list -v -keystore keystore.jks -storepass tvplayer123 2>/dev/null | grep -E "Alias|Valid|SHA" | head -5 || true
 
       # ═══════════════════════════════════════════════════
       # 6. СБОРКА APK
@@ -755,9 +804,9 @@ jobs:
       - name: "🔨 Сборка Release APK"
         id: build
         run: |
-          echo "::group::Gradle assembleRelease"
+          echo "::group::Gradle assembleRelease (--info)"
           set +e
-          gradle assembleRelease --no-daemon --stacktrace --warning-mode all 2>&1 | tee /tmp/gradle_build.log
+          gradle assembleRelease --no-daemon --stacktrace --warning-mode all --info 2>&1 | tee /tmp/gradle_build.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           echo "::endgroup::"
@@ -767,21 +816,29 @@ jobs:
             echo "══════════ ОШИБКА СБОРКИ ══════════"
             echo "Gradle завершился с кодом $EXIT_CODE"
             echo ""
-            echo "─── Что пошло не так (последние 50 строк) ───"
-            grep -A 30 "What went wrong" /tmp/gradle_build.log | head -40 || tail -50 /tmp/gradle_build.log
+            echo "─── What went wrong ───"
+            grep -A 40 "What went wrong" /tmp/gradle_build.log | head -50 || tail -80 /tmp/gradle_build.log
             echo ""
-            echo "─── Подсказки для частых ошибок ───"
+            echo "─── Последние 80 строк лога ───"
+            tail -80 /tmp/gradle_build.log
+            echo ""
+            echo "─── Подсказки ───"
             if grep -q "Could not resolve\|Could not find" /tmp/gradle_build.log; then
-              echo "💡 Проблема с зависимостями. Проверь версии в app/build.gradle."
+              echo "💡 Проблема с зависимостями (Maven)."
             fi
-            if grep -q "chaquopy\|Chaquopy\|Python" /tmp/gradle_build.log | head -1; then
-              echo "💡 Что-то с Chaquopy/Python. Возможно, проблема с pip-пакетом yt-dlp."
+            if grep -qi "chaquopy\|python\|pip" /tmp/gradle_build.log; then
+              echo "💡 Что-то с Chaquopy/Python/yt-dlp."
+              grep -i "chaquopy\|python\|pip" /tmp/gradle_build.log | tail -10 || true
             fi
             if grep -q "SDK location not found\|ANDROID_HOME" /tmp/gradle_build.log; then
-              echo "💡 Проблема с Android SDK. Проверь шаг 'Android SDK'."
+              echo "💡 Проблема с Android SDK."
+            fi
+            if grep -q "NDK\|ndk" /tmp/gradle_build.log; then
+              echo "💡 Проблема с NDK."
+              grep -i "ndk" /tmp/gradle_build.log | tail -5 || true
             fi
             if grep -q "Execution failed for task" /tmp/gradle_build.log; then
-              echo "💡 Упала задача: $(grep 'Execution failed for task' /tmp/gradle_build.log | head -1)"
+              echo "💡 Упавшая задача: $(grep 'Execution failed for task' /tmp/gradle_build.log | head -1)"
             fi
 
             {
@@ -789,9 +846,9 @@ jobs:
               echo ""
               echo "**Код выхода:** $EXIT_CODE"
               echo ""
-              echo "**Первая ошибка:**"
+              echo "**What went wrong:**"
               echo '```'
-              grep -A 10 "What went wrong" /tmp/gradle_build.log | head -15 || tail -30 /tmp/gradle_build.log
+              grep -A 15 "What went wrong" /tmp/gradle_build.log | head -20 || tail -40 /tmp/gradle_build.log
               echo '```'
             } >> $GITHUB_STEP_SUMMARY
             exit 1
@@ -808,9 +865,9 @@ jobs:
         run: |
           SRC=$(find app/build/outputs/apk/release -name "*.apk" -type f | head -1)
           if [ -z "$SRC" ]; then
-            echo "::error title=APK не найден::Gradle отработал, но APK в app/build/outputs/apk/release отсутствует."
+            echo "::error title=APK не найден::Gradle отработал, но APK отсутствует."
             echo "### ❌ APK не найден" >> $GITHUB_STEP_SUMMARY
-            ls -la app/build/outputs/apk/ 2>/dev/null || echo "Папка outputs пуста"
+            ls -la app/build/outputs/apk/ 2>/dev/null || echo "Папка пуста"
             exit 1
           fi
 
@@ -819,7 +876,7 @@ jobs:
           SHA=$(sha256sum "$SRC" | awk '{print $1}')
 
           if [ "$SIZE_BYTES" -lt 1048576 ]; then
-            echo "::error title=APK подозрительно мал::Размер $SIZE_MB МБ — вероятно, что-то пошло не так."
+            echo "::error title=APK подозрительно мал::Размер $SIZE_MB МБ"
             exit 1
           fi
 
@@ -834,10 +891,7 @@ jobs:
           echo "sha=$SHA" >> $GITHUB_OUTPUT
           echo "version=$V" >> $GITHUB_OUTPUT
 
-          echo "✅ APK: $FILE"
-          echo "   Размер: $SIZE_MB МБ"
-          echo "   SHA256: $SHA"
-
+          echo "✅ APK: $FILE ($SIZE_MB МБ)"
           {
             echo "### 📦 APK готов"
             echo ""
@@ -896,7 +950,7 @@ jobs:
           } >> $GITHUB_STEP_SUMMARY
 
       # ═══════════════════════════════════════════════════
-      # 9. ФИНАЛЬНАЯ СВОДКА (при любом исходе)
+      # 9. ИТОГОВАЯ СВОДКА
       # ═══════════════════════════════════════════════════
       - name: "📊 Итоговая сводка"
         if: always()
@@ -910,7 +964,8 @@ jobs:
             echo "| Шаг | Статус |"
             echo "|---|---|"
             echo "| Android SDK | ${{ steps.setup-android.outcome == 'success' && '✅' || '⚠️' }} |"
-            echo "| Проверка проекта | ${{ steps.detect.outcome == 'success' && '✅' || '❌' }} |"
+            echo "| Очистка | ✅ |"
+            echo "| Генерация | ✅ |"
             echo "| Сборка APK | ${{ steps.build.outcome == 'success' && '✅' || '❌' }} |"
             echo "| Проверка APK | ${{ steps.apk.outcome == 'success' && '✅' || '❌' }} |"
           } >> $GITHUB_STEP_SUMMARY
@@ -918,5 +973,5 @@ jobs:
           if [ "${{ job.status }}" = "success" ]; then
             echo "::notice::Сборка завершена успешно"
           else
-            echo "::error title=Сборка провалена::Смотри сводку выше и лог упавшего шага."
+            echo "::error title=Сборка провалена::Смотри сводку и лог упавшего шага."
           fi
