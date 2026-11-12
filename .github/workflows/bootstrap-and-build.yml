@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40          # ← запас на первый долгий прогон Chaquopy
 
     steps:
       - name: "🩺 Диагностика окружения"
@@ -174,6 +175,7 @@ jobs:
           }
           EOF
 
+          # ⚠️ ИСПРАВЛЕНО: minifyEnabled false (Groovy DSL)
           cat > app/build.gradle << 'EOF'
           plugins {
               id("com.android.application")
@@ -205,7 +207,7 @@ jobs:
               buildTypes {
                   release {
                       signingConfig = signingConfigs.getByName("release")
-                      isMinifyEnabled = false
+                      minifyEnabled false
                   }
               }
               buildFeatures { viewBinding = true }
@@ -741,7 +743,7 @@ jobs:
             exit 1
           fi
 
-          for section in "chaquopy" "signingConfigs" "media3-exoplayer" "ndkVersion"; do
+          for section in "chaquopy" "signingConfigs" "media3-exoplayer" "ndkVersion" "minifyEnabled"; do
             if grep -q "$section" app/build.gradle; then
               echo "  ✅ build.gradle содержит '$section'"
             else
