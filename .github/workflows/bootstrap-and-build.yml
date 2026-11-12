@@ -36,11 +36,11 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ПОЛНЫЙ ПАТЧ: И плеер, и качество, и список
+      # ПОЛНЫЙ ПАТЧ (Исправлена ошибка с атрибутом плеера)
       # ═══════════════════════════════════════════════════
-      - name: "🎨 Применение всех правок (Плеер + Список)"
+      - name: "🎨 Применение всех правок"
         run: |
-          # 1. ИСПРАВЛЕННЫЙ resolver.py (ищет Master-плейлист со всеми качествами)
+          # 1. ИСПРАВЛЕННЫЙ resolver.py
           cat > app/src/main/python/resolver.py << 'EOF'
           import yt_dlp
           HEADERS = {
@@ -82,7 +82,7 @@ jobs:
                   return "ERROR: " + str(e)
           EOF
 
-          # 2. activity_player.xml (Кнопка качества в углу + скрытие панелей)
+          # 2. activity_player.xml (Убрали проблемный атрибут controller_show_timeout_ms)
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -95,7 +95,6 @@ jobs:
                   android:id="@+id/playerView"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
-                  app:controller_show_timeout_ms="2000"
                   app:show_buffering="when_playing"
                   app:use_controller="true"
                   app:resize_mode="zoom"
@@ -134,7 +133,7 @@ jobs:
           </FrameLayout>
           EOF
 
-          # 3. PlayerActivity.kt (Полный экран + Выбор качества)
+          # 3. PlayerActivity.kt
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
 
@@ -168,7 +167,6 @@ jobs:
                   b = ActivityPlayerBinding.inflate(layoutInflater)
                   setContentView(b.root)
                   
-                  // Включаем полноэкранный режим (скрываем системные панели)
                   WindowCompat.setDecorFitsSystemWindows(window, false)
                   val controller = WindowInsetsControllerCompat(window, window.decorView)
                   controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -250,12 +248,11 @@ jobs:
                   super.onDestroy()
                   player?.release()
                   player = null
-                  // ВАЖНО: здесь НЕТ killProcess, чтобы приложение не закрывалось при нажатии "Назад"
               }
           }
           EOF
 
-          # 4. item_channel.xml (Список, без лишнего текста)
+          # 4. item_channel.xml
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -292,7 +289,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 5. activity_main.xml (Темная шапка)
+          # 5. activity_main.xml
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <androidx.constraintlayout.widget.ConstraintLayout
@@ -377,7 +374,7 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
-          # 6. MainActivity.kt (Список + автофокус)
+          # 6. MainActivity.kt
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Intent
@@ -445,7 +442,7 @@ jobs:
           }
           EOF
 
-          # 7. ChannelAdapter.kt (Без subtitle)
+          # 7. ChannelAdapter.kt
           cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
           package com.tvplayer.app
           import android.view.*
@@ -486,7 +483,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: full player quality patch, fullscreen and list ui" || echo "no changes"
+          git commit -m "fix: removed invalid xml attribute, player ui and quality ready" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
