@@ -36,11 +36,404 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ПАТЧ: Стабильность, 5 попыток Auto-Retry, Таймер сна
+      # МАСТЕР-ПАТЧ: Всё в одном файле
       # ═══════════════════════════════════════════════════
-      - name: "🛡 Умный авто-ретрай и таймер сна"
+      - name: "🚀 Установка всех фич (Избранное, Зэппинг, Качество)"
         run: |
-          # 1. activity_player.xml (UI с кнопкой Повторить и таймером)
+          # 1. Манифест
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-feature android:name="android.software.leanback" android:required="false" />
+              <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+              <application
+                  android:allowBackup="false"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:name="com.chaquo.python.android.PyApplication"
+                  android:networkSecurityConfig="@xml/network_security_config"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@style/Theme.TVPlayer">
+                  <activity android:name=".MainActivity" android:exported="true"
+                      android:screenOrientation="unspecified">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <activity android:name=".PlayerActivity" android:exported="false"
+                      android:screenOrientation="sensorLandscape" />
+                  <service android:name=".PlaybackService" android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
+              </application>
+          </manifest>
+          EOF
+
+          # 2. Модель данных VkApi (с флагом избранного)
+          cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
+          package com.tvplayer.app
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONObject
+          import java.util.UUID
+          import java.util.concurrent.TimeUnit
+
+          data class Channel(
+              val name: String, 
+              val url: String, 
+              val logo: String, 
+              val group: String = "VK Live",
+              var isFavorite: Boolean = false
+          )
+
+          private val client = OkHttpClient.Builder()
+              .connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+          private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+          suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
+              withContext(Dispatchers.IO) {
+                  val result = mutableListOf<Channel>()
+                  try {
+                      val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
+                      val req = Request.Builder().url(url)
+                          .header("User-Agent", UA)
+                          .header("Accept", "application/json, text/plain, */*")
+                          .header("Origin", "https://live.vkvideo.ru")
+                          .header("Referer", "https://live.vkvideo.ru/")
+                          .header("X-App", "streams_web")
+                          .header("X-From-Id", UUID.randomUUID().toString()).build()
+
+                      client.newCall(req).execute().use { resp ->
+                          val body = resp.body?.string().orEmpty()
+                          if (resp.isSuccessful && body.isNotBlank()) {
+                              val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
+                              if (streams != null) for (i in 0 until streams.length()) {
+                                  val item = streams.optJSONObject(i) ?: continue
+                                  val isOnline = item.optBoolean("is_online", true)
+                                  if (!isOnline) continue
+
+                                  val blog = item.optJSONObject("blog") ?: continue
+                                  val blogUrl = blog.optString("blogUrl"); if (blogUrl.isBlank()) continue
+                                  val raw = blog.optString("title").ifBlank {
+                                      blog.optJSONObject("owner")?.optString("displayName").orEmpty()
+                                  }.ifBlank { blogUrl }
+                                  val name = if (raw.length > 60) raw.take(60) + "…" else raw
+                                  val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null } ?: blog.optString("coverUrl")
+                                  result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
+                              }
+                          }
+                      }
+                  } catch (_: Exception) {}
+                  result + manual
+              }
+          EOF
+
+          # 3. Карточка канала со звездой
+          cat > app/src/main/res/layout/item_channel.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="horizontal"
+              android:padding="12dp"
+              android:focusable="true"
+              android:focusableInTouchMode="true"
+              android:background="@drawable/tile_selector"
+              android:clickable="true"
+              android:layout_marginBottom="4dp"
+              android:gravity="center_vertical">
+
+              <ImageView
+                  android:id="@+id/logo"
+                  android:layout_width="80dp"
+                  android:layout_height="80dp"
+                  android:scaleType="centerCrop"
+                  android:background="#222222" />
+
+              <TextView
+                  android:id="@+id/name"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_weight="1"
+                  android:paddingStart="16dp"
+                  android:paddingEnd="8dp"
+                  android:gravity="center_vertical"
+                  android:textColor="@color/text"
+                  android:textSize="18sp"
+                  android:textStyle="bold"
+                  android:maxLines="2"
+                  android:ellipsize="end" />
+
+              <ImageView
+                  android:id="@+id/btnFav"
+                  android:layout_width="48dp"
+                  android:layout_height="48dp"
+                  android:padding="8dp"
+                  android:src="@android:drawable/btn_star_big_off"
+                  android:clickable="true"
+                  android:focusable="true"
+                  android:background="?attr/selectableItemBackgroundBorderless" />
+          </LinearLayout>
+          EOF
+
+          # 4. Адаптер с логикой звезд
+          cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
+          package com.tvplayer.app
+          import android.view.*
+          import android.widget.ImageView
+          import android.widget.TextView
+          import androidx.recyclerview.widget.RecyclerView
+          import coil.load
+
+          class ChannelAdapter(
+              private val items: List<Channel>, 
+              private val onClick: (Channel) -> Unit,
+              private val onFavoriteClick: (Channel) -> Unit
+          ) : RecyclerView.Adapter<ChannelAdapter.VH>() {
+
+              class VH(v: View) : RecyclerView.ViewHolder(v) {
+                  val logo: ImageView = v.findViewById(R.id.logo)
+                  val name: TextView = v.findViewById(R.id.name)
+                  val btnFav: ImageView = v.findViewById(R.id.btnFav)
+              }
+
+              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH =
+                  VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
+
+              override fun onBindViewHolder(h: VH, pos: Int) {
+                  val ch = items[pos]
+                  h.name.text = ch.name
+                  
+                  if (ch.logo.isNotBlank()) {
+                      h.logo.load(ch.logo) {
+                          crossfade(true)
+                          placeholder(android.R.color.darker_gray)
+                          error(android.R.color.darker_gray)
+                      }
+                  } else {
+                      h.logo.setImageResource(android.R.color.darker_gray)
+                  }
+
+                  if (ch.isFavorite) {
+                      h.btnFav.setImageResource(android.R.drawable.btn_star_big_on)
+                      h.btnFav.setColorFilter(android.graphics.Color.YELLOW)
+                  } else {
+                      h.btnFav.setImageResource(android.R.drawable.btn_star_big_off)
+                      h.btnFav.setColorFilter(android.graphics.Color.GRAY)
+                  }
+
+                  h.itemView.setOnClickListener { onClick(ch) }
+                  h.btnFav.setOnClickListener { onFavoriteClick(ch) }
+              }
+              override fun getItemCount() = items.size
+          }
+          EOF
+
+          # 5. Главный экран (с кнопкой фильтра избранного)
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg">
+
+              <LinearLayout
+                  android:id="@+id/topBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="64dp"
+                  android:orientation="horizontal"
+                  android:background="#1A1A1A"
+                  android:gravity="center_vertical"
+                  android:paddingHorizontal="16dp"
+                  app:layout_constraintTop_toTopOf="parent">
+
+                  <TextView
+                      android:id="@+id/txtTitle"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Все каналы"
+                      android:textColor="@color/text"
+                      android:textSize="22sp"
+                      android:textStyle="bold" />
+
+                  <TextView
+                      android:id="@+id/btnFavFilter"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="★ Избранное"
+                      android:textColor="#FFEB3B"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:padding="12dp"
+                      android:background="?attr/selectableItemBackground" />
+
+                  <TextView
+                      android:id="@+id/btnRefresh"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Обновить"
+                      android:textColor="@color/text_dim"
+                      android:textSize="16sp"
+                      android:padding="12dp"
+                      android:background="?attr/selectableItemBackground" />
+              </LinearLayout>
+
+              <androidx.recyclerview.widget.RecyclerView
+                  android:id="@+id/recycler"
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:padding="8dp"
+                  android:clipToPadding="false"
+                  app:layout_constraintTop_toBottomOf="@id/topBar"
+                  app:layout_constraintBottom_toTopOf="@id/btnExit"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <TextView
+                  android:id="@+id/btnExit"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Выход"
+                  android:textColor="@color/text_dim"
+                  android:textSize="16sp"
+                  android:gravity="center"
+                  android:padding="20dp"
+                  android:background="?attr/selectableItemBackground"
+                  app:layout_constraintBottom_toBottomOf="parent" />
+
+              <ProgressBar
+                  android:id="@+id/progress"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  app:layout_constraintTop_toTopOf="@id/recycler"
+                  app:layout_constraintBottom_toBottomOf="@id/recycler"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <TextView
+                  android:id="@+id/error"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:textColor="@color/text_dim"
+                  android:visibility="gone"
+                  app:layout_constraintTop_toTopOf="@id/recycler"
+                  app:layout_constraintBottom_toBottomOf="@id/recycler"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          EOF
+
+          # 6. MainActivity (Логика избранного, сохранение канала)
+          cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Intent
+          import android.os.Bundle
+          import android.view.View
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.lifecycle.lifecycleScope
+          import androidx.recyclerview.widget.LinearLayoutManager
+          import com.tvplayer.app.databinding.ActivityMainBinding
+          import kotlinx.coroutines.launch
+          import org.json.JSONObject
+
+          class MainActivity : AppCompatActivity() {
+              private lateinit var b: ActivityMainBinding
+              private var allChannels: List<Channel> = emptyList()
+              private var showOnlyFavorites = false
+              private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
+                  b.recycler.layoutManager = LinearLayoutManager(this)
+                  
+                  b.btnRefresh.setOnClickListener { load() }
+                  b.btnExit.setOnClickListener { exitApp() }
+                  b.btnFavFilter.setOnClickListener {
+                      showOnlyFavorites = !showOnlyFavorites
+                      updateView()
+                  }
+                  load()
+              }
+
+              private fun exitApp() {
+                  finishAndRemoveTask()
+                  android.os.Process.killProcess(android.os.Process.myPid())
+              }
+
+              private fun load() {
+                  b.progress.visibility = View.VISIBLE
+                  b.error.visibility = View.GONE
+                  b.recycler.visibility = View.GONE
+                  lifecycleScope.launch {
+                      val (manual, cat) = readConfig()
+                      allChannels = loadChannels(cat, manual)
+                      b.progress.visibility = View.GONE
+                      if (allChannels.isEmpty()) {
+                          b.error.text = getString(R.string.error_load)
+                          b.error.visibility = View.VISIBLE; return@launch
+                      }
+                      updateView()
+                  }
+              }
+
+              private fun updateView() {
+                  val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
+                  allChannels.forEach { it.isFavorite = favs.contains(it.url) }
+                  
+                  val sorted = allChannels.sortedByDescending { it.isFavorite }
+                  val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
+
+                  b.txtTitle.text = if (showOnlyFavorites) "Избранное" else "Все каналы"
+                  b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
+
+                  b.recycler.visibility = View.VISIBLE
+                  b.recycler.adapter = ChannelAdapter(displayed, { ch ->
+                      val intent = Intent(this@MainActivity, PlayerActivity::class.java)
+                      intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
+                      intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))
+                      intent.putStringArrayListExtra("urls", ArrayList(allChannels.map { it.url }))
+                      startActivity(intent)
+                  }, { ch ->
+                      val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
+                      if (currentFavs.contains(ch.url)) currentFavs.remove(ch.url) else currentFavs.add(ch.url)
+                      prefs.edit().putStringSet("favorites", currentFavs).apply()
+                      updateView()
+                  })
+
+                  b.recycler.post {
+                      b.recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
+                  }
+              }
+
+              private fun readConfig(): Pair<List<Channel>, String> {
+                  val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
+                  val o = JSONObject(json); val manual = mutableListOf<Channel>()
+                  o.optJSONArray("channels")?.let { arr ->
+                      for (i in 0 until arr.length()) {
+                          val c = arr.getJSONObject(i)
+                          manual.add(Channel(c.optString("name"), c.optString("url"),
+                              c.optString("logo"), c.optString("group", "VK Video")))
+                      }
+                  }
+                  val cats = o.optJSONArray("categories")
+                  return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
+              }
+          }
+          EOF
+
+          # 7. Экран плеера (с кнопкой Назад, Сон, Качество и т.д.)
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -62,6 +455,20 @@ jobs:
                   android:layout_width="match_parent"
                   android:layout_height="match_parent" />
 
+              <TextView
+                  android:id="@+id/channelNameOverlay"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="bottom|start"
+                  android:layout_margin="32dp"
+                  android:background="#AA000000"
+                  android:paddingHorizontal="24dp"
+                  android:paddingVertical="16dp"
+                  android:textColor="#FFFFFF"
+                  android:textSize="24sp"
+                  android:textStyle="bold"
+                  android:visibility="gone" />
+
               <LinearLayout
                   android:id="@+id/controlsOverlay"
                   android:layout_width="match_parent"
@@ -82,10 +489,27 @@ jobs:
               </LinearLayout>
 
               <TextView
-                  android:id="@+id/btnSleepTimer"
+                  android:id="@+id/btnBack"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="top|start"
+                  android:layout_margin="24dp"
+                  android:background="#AA000000"
+                  android:paddingHorizontal="16dp"
+                  android:paddingVertical="8dp"
+                  android:text="← Назад"
+                  android:textColor="#FFFFFF"
+                  android:textSize="16sp"
+                  android:textStyle="bold"
+                  android:clickable="true"
+                  android:focusable="true"
+                  android:visibility="gone" />
+
+              <TextView
+                  android:id="@+id/btnSleepTimer"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|center_horizontal"
                   android:layout_margin="24dp"
                   android:background="#AA000000"
                   android:paddingHorizontal="16dp"
@@ -121,7 +545,6 @@ jobs:
                   android:layout_height="wrap_content"
                   android:layout_gravity="center" />
 
-              <!-- Блок ошибки с кнопкой Повторить -->
               <LinearLayout
                   android:id="@+id/errorLayout"
                   android:layout_width="wrap_content"
@@ -159,7 +582,7 @@ jobs:
           </FrameLayout>
           EOF
 
-          # 2. PlayerActivity.kt (Логика: 5 попыток авто-ретрая)
+          # 8. PlayerActivity (Всё в одном: пульт, сон, 5 ретраев, качество+битрейт)
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
 
@@ -169,6 +592,7 @@ jobs:
           import android.os.CountDownTimer
           import android.os.Handler
           import android.os.Looper
+          import android.view.KeyEvent
           import android.view.View
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.view.WindowCompat
@@ -195,16 +619,23 @@ jobs:
               private lateinit var trackSelector: DefaultTrackSelector
               private var sleepTimer: CountDownTimer? = null
 
-              private var currentChannelUrl: String = ""
+              private var names: List<String> = emptyList()
+              private var urls: List<String> = emptyList()
+              private var currentIndex: Int = 0
+
               private var retryCount = 0
-              private val MAX_RETRIES = 5       // Максимум 5 попыток
-              private val RETRY_DELAY = 2000L   // Задержка 2 секунды
+              private val MAX_RETRIES = 5
+              private val RETRY_DELAY = 2000L
 
               private val handler = Handler(Looper.getMainLooper())
               private val hideControlsRunnable = Runnable {
                   b.controlsOverlay.visibility = View.GONE
                   b.btnQuality.visibility = View.GONE
                   b.btnSleepTimer.visibility = View.GONE
+                  b.btnBack.visibility = View.GONE
+              }
+              private val hideChannelOverlayRunnable = Runnable {
+                  b.channelNameOverlay.visibility = View.GONE
               }
 
               override fun onCreate(s: Bundle?) {
@@ -217,24 +648,66 @@ jobs:
                   controller.hide(WindowInsetsCompat.Type.systemBars())
                   controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-                  currentChannelUrl = intent.getStringExtra("url").orEmpty()
+                  names = intent.getStringArrayListExtra("names") ?: emptyList()
+                  urls = intent.getStringArrayListExtra("urls") ?: emptyList()
+                  currentIndex = intent.getIntExtra("index", 0)
+
                   startPlayback()
 
+                  b.btnBack.setOnClickListener { finish() }
                   b.btnRetry.setOnClickListener {
                       b.errorLayout.visibility = View.GONE
-                      retryCount = 0 // Сбрасываем счетчик при ручном клике
+                      retryCount = 0
+                      startPlayback()
+                  }
+              }
+
+              override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                  if (b.controlsOverlay.visibility == View.VISIBLE) {
+                      return super.dispatchKeyEvent(event)
+                  }
+                  if (event.action == KeyEvent.ACTION_DOWN) {
+                      when (event.keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                              switchChannel(-1); return true
+                          }
+                          KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_LEFT -> {
+                              switchChannel(1); return true
+                          }
+                          KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                              showControls(); return true
+                          }
+                      }
+                  }
+                  return super.dispatchKeyEvent(event)
+              }
+
+              private fun switchChannel(direction: Int) {
+                  val newIndex = currentIndex + direction
+                  if (newIndex in urls.indices) {
+                      currentIndex = newIndex
                       startPlayback()
                   }
               }
 
               private fun startPlayback() {
+                  getSharedPreferences("tvplayer", MODE_PRIVATE).edit()
+                      .putInt("last_channel", currentIndex).apply()
+
+                  b.channelNameOverlay.text = names.getOrNull(currentIndex) ?: "Канал"
+                  b.channelNameOverlay.visibility = View.VISIBLE
+                  handler.removeCallbacks(hideChannelOverlayRunnable)
+                  handler.postDelayed(hideChannelOverlayRunnable, 3000)
+
                   b.progress.visibility = View.VISIBLE
                   b.errorLayout.visibility = View.GONE
+                  retryCount = 0
+                  
+                  val url = urls.getOrNull(currentIndex) ?: return
                   lifecycleScope.launch {
-                      val direct = StreamResolver.resolve(currentChannelUrl)
+                      val direct = StreamResolver.resolve(url)
                       if (direct.startsWith("ERROR:")) {
-                          handleError() // Ошибка резолва
-                          return@launch
+                          handleError(); return@launch
                       }
                       play(direct)
                   }
@@ -263,14 +736,11 @@ jobs:
                           addListener(object : Player.Listener {
                               override fun onTracksChanged(tracks: Tracks) {
                                   updateQualityButton(tracks)
-                                  // Если видео пошло — сбрасываем счетчик ошибок
                                   retryCount = 0
                                   b.progress.visibility = View.GONE
                               }
-
                               override fun onPlayerError(error: PlaybackException) {
-                                  super.onPlayerError(error)
-                                  handleError() // Ошибка воспроизведения
+                                  super.onPlayerError(error); handleError()
                               }
                           })
                       }
@@ -286,55 +756,83 @@ jobs:
                   b.btnPlayPause.setOnClickListener {
                       player?.let { p ->
                           if (p.isPlaying) {
-                              p.pause()
-                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
+                              p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
                           } else {
-                              p.play()
-                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                              p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
                           }
                       }
                       showControls()
                   }
                   
                   b.touchArea.setOnClickListener { 
-                      if (b.controlsOverlay.visibility == View.VISIBLE) {
-                          hideControlsRunnable.run()
-                      } else {
-                          showControls()
-                      }
+                      if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls()
                   }
               }
 
-              // --- ЛОГИКА АВТО-РЕТРАЯ ---
+              private fun updateQualityButton(tracks: Tracks) {
+                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                  val selectedIndex = (0 until videoGroup.length).firstOrNull { videoGroup.isTrackSelected(it) } ?: return
+                  val format = videoGroup.getTrackFormat(selectedIndex)
+                  
+                  val height = if (format.height > 0) "${format.height}p" else "Auto"
+                  val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
+                  b.btnQuality.text = height + bitrate
+              }
+
+              private fun showQualityDialog() {
+                  val p = player ?: return
+                  val tracks = p.currentTracks
+                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                  val qualities = mutableListOf<String>()
+                  qualities.add("Авто (Auto)")
+                  val formats = mutableListOf<androidx.media3.common.Format>()
+                  var selectedTrackIndex = -1
+                  for (i in 0 until videoGroup.length) {
+                      if (videoGroup.isTrackSelected(i)) { selectedTrackIndex = i; break }
+                  }
+                  for (i in 0 until videoGroup.length) {
+                      val format = videoGroup.getTrackFormat(i)
+                      val prefix = if (i == selectedTrackIndex) "▶ " else "   "
+                      val text = if (format.height > 0) "${prefix}${format.height}p (${format.bitrate / 1000} kbps)" else "${prefix}Track $i"
+                      qualities.add(text); formats.add(format)
+                  }
+                  AlertDialog.Builder(this).setTitle("Качество видео").setItems(qualities.toTypedArray()) { _, which ->
+                      if (which == 0) {
+                          trackSelector.parameters = trackSelector.buildUponParameters()
+                              .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                              .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                              .build()
+                      } else {
+                          trackSelector.parameters = trackSelector.buildUponParameters()
+                              .setOverrideForType(TrackSelectionOverride(videoGroup.getMediaTrackGroup(), which - 1))
+                              .build()
+                      }
+                  }.show()
+              }
+
               private fun handleError() {
                   if (retryCount < MAX_RETRIES) {
                       retryCount++
-                      b.progress.visibility = View.VISIBLE // Показываем кружок загрузки
-                      // Ждем 2 секунды и пробуем снова
-                      handler.postDelayed({
-                          startPlayback()
-                      }, RETRY_DELAY)
+                      b.progress.visibility = View.VISIBLE
+                      handler.postDelayed({ startPlayback() }, RETRY_DELAY)
                   } else {
-                      // Попытки кончились — показываем страшную кнопку
                       b.progress.visibility = View.GONE
-                      b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES\nПроверьте интернет."
+                      b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
                       b.errorLayout.visibility = View.VISIBLE
                       b.controlsOverlay.visibility = View.GONE
                       b.btnQuality.visibility = View.GONE
                       b.btnSleepTimer.visibility = View.GONE
+                      b.btnBack.visibility = View.GONE
                   }
               }
 
               private fun showSleepTimerDialog() {
                   val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
                   val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
-                  
-                  AlertDialog.Builder(this)
-                      .setTitle("Таймер сна")
-                      .setItems(options) { _, which ->
-                          val mins = minutes[which]
-                          if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
-                      }.show()
+                  AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which ->
+                      val mins = minutes[which]
+                      if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
+                  }.show()
               }
 
               private fun startSleepTimer(minutes: Int) {
@@ -366,42 +864,9 @@ jobs:
                   b.controlsOverlay.visibility = View.VISIBLE
                   b.btnQuality.visibility = View.VISIBLE
                   b.btnSleepTimer.visibility = View.VISIBLE
+                  b.btnBack.visibility = View.VISIBLE
                   handler.removeCallbacks(hideControlsRunnable)
                   handler.postDelayed(hideControlsRunnable, 4000)
-              }
-
-              private fun updateQualityButton(tracks: Tracks) {
-                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
-                  val selectedIndex = (0 until videoGroup.length).firstOrNull { videoGroup.isTrackSelected(it) } ?: return
-                  val format = videoGroup.getTrackFormat(selectedIndex)
-                  b.btnQuality.text = if (format.height > 0) "${format.height}p" else "Auto"
-              }
-
-              private fun showQualityDialog() {
-                  val p = player ?: return
-                  val tracks = p.currentTracks
-                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
-                  val qualities = mutableListOf<String>()
-                  qualities.add("Авто (Auto)")
-                  val formats = mutableListOf<androidx.media3.common.Format>()
-                  for (i in 0 until videoGroup.length) {
-                      val format = videoGroup.getTrackFormat(i)
-                      val text = if (format.height > 0) "${format.height}p (${format.bitrate / 1000} kbps)" else "Track $i"
-                      qualities.add(text)
-                      formats.add(format)
-                  }
-                  AlertDialog.Builder(this).setTitle("Качество видео").setItems(qualities.toTypedArray()) { _, which ->
-                      if (which == 0) {
-                          trackSelector.parameters = trackSelector.buildUponParameters()
-                              .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
-                              .setAllowVideoMixedMimeTypeAdaptiveness(true)
-                              .build()
-                      } else {
-                          trackSelector.parameters = trackSelector.buildUponParameters()
-                              .setOverrideForType(TrackSelectionOverride(videoGroup.getMediaTrackGroup(), which - 1))
-                              .build()
-                      }
-                  }.show()
               }
 
               override fun onDestroy() {
@@ -414,10 +879,14 @@ jobs:
           }
           EOF
 
+          echo "Обновляем versionCode..."
+          RUN_NUMBER="${{ github.run_number }}"
+          sed -i "s/versionCode = [0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: 5x auto-retry with delay, sleep timer, stable live ui" || echo "no changes"
+          git commit -m "release: master build with all features" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
