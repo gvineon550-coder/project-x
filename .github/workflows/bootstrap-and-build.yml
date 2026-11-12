@@ -377,9 +377,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 2: Python (Правильные обложки через og:image)
+      # ШАГ 2: Python (Резолвер)
       # ═══════════════════════════════════════════════════
-      - name: "🐍 Обновление Python (Парсер og:image)"
+      - name: "🐍 Обновление Python (Резолвер)"
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
           import yt_dlp
@@ -417,7 +417,6 @@ jobs:
                   return "ERROR: " + str(e)
 
           def get_thumbnail(url):
-              # 1. Пытаемся достать картинку напрямую из HTML (самый точный способ)
               try:
                   req = urllib.request.Request(url, headers=HEADERS)
                   with urllib.request.urlopen(req, timeout=10) as response:
@@ -427,8 +426,6 @@ jobs:
                           return match.group(1)
               except Exception:
                   pass
-              
-              # 2. Если HTML не сработал, пробуем через yt-dlp
               try:
                   with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "http_headers": HEADERS}) as ydl:
                       info = ydl.extract_info(url, download=False)
@@ -438,9 +435,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin (Список, Кэш, Чистка картинок)
+      # ШАГ 3: Kotlin (Список, Кэш, Модели + Ограничение картинок)
       # ═══════════════════════════════════════════════════
-      - name: "🧠 Генерация Kotlin (Список и Кэш)"
+      - name: "🧠 Генерация Kotlin (Экономия памяти)"
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
           package com.tvplayer.app
@@ -555,9 +552,15 @@ jobs:
                   h.txtNumber.text = (pos + 1).toString()
                   h.name.text = ch.name
                   if (ch.logo.isNotBlank()) {
-                      h.logo.load(ch.logo) { crossfade(true); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+                      // size(160, 160) сжимает картинку перед кэшированием, экономя память
+                      h.logo.load(ch.logo) { 
+                          crossfade(true)
+                          size(160, 160)
+                          placeholder(android.R.color.darker_gray)
+                          error(android.R.color.darker_gray)
+                      }
                   } else {
-                      h.logo.load(null) // Очищаем предыдущую картинку, чтобы не прилипала
+                      h.logo.load(null)
                       h.logo.setImageDrawable(null)
                   }
                   if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
@@ -568,6 +571,7 @@ jobs:
           }
           EOF
 
+          # MainActivity реализует ImageLoaderFactory для ограничения дискового кэша Coil
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Intent
@@ -577,14 +581,31 @@ jobs:
           import androidx.appcompat.app.AppCompatActivity
           import androidx.lifecycle.lifecycleScope
           import androidx.recyclerview.widget.LinearLayoutManager
+          import coil.ImageLoader
+          import coil.ImageLoaderFactory
+          import coil.disk.DiskCache
           import com.tvplayer.app.databinding.ActivityMainBinding
           import kotlinx.coroutines.launch
           import org.json.JSONObject
-          class MainActivity : AppCompatActivity() {
+
+          class MainActivity : AppCompatActivity(), ImageLoaderFactory {
               private lateinit var b: ActivityMainBinding
               private var allChannels: List<Channel> = emptyList()
               private var showOnlyFavorites = false
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
+
+              // ОГРАНИЧИВАЕМ КЭШ КАРТИНОК ДО 15 МБ
+              override fun newImageLoader(): ImageLoader {
+                  return ImageLoader.Builder(this)
+                      .diskCache {
+                          DiskCache.Builder()
+                              .directory(cacheDir.resolve("image_cache"))
+                              .maxSizeBytes(15L * 1024L * 1024L)
+                              .build()
+                      }
+                      .build()
+              }
+
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
@@ -860,7 +881,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: robust og:image parsing and clear recycled images" || echo "no changes"
+          git commit -m "perf: limit Coil cache to 15MB, compress thumbnails" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
