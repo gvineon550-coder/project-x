@@ -14,10 +14,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -29,6 +31,11 @@ class PlayerActivity : AppCompatActivity() {
     private var player: ExoPlayer? = null
     private lateinit var trackSelector: DefaultTrackSelector
     private var sleepTimer: CountDownTimer? = null
+
+    private var currentChannelUrl: String = ""
+    private var retryCount = 0
+    private val MAX_RETRIES = 5       // Максимум 5 попыток
+    private val RETRY_DELAY = 2000L   // Задержка 2 секунды
 
     private val handler = Handler(Looper.getMainLooper())
     private val hideControlsRunnable = Runnable {
@@ -47,15 +54,23 @@ class PlayerActivity : AppCompatActivity() {
         controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-        val url = intent.getStringExtra("url").orEmpty()
-        b.progress.visibility = View.VISIBLE
+        currentChannelUrl = intent.getStringExtra("url").orEmpty()
+        startPlayback()
 
+        b.btnRetry.setOnClickListener {
+            b.errorLayout.visibility = View.GONE
+            retryCount = 0 // Сбрасываем счетчик при ручном клике
+            startPlayback()
+        }
+    }
+
+    private fun startPlayback() {
+        b.progress.visibility = View.VISIBLE
+        b.errorLayout.visibility = View.GONE
         lifecycleScope.launch {
-            val direct = StreamResolver.resolve(url)
+            val direct = StreamResolver.resolve(currentChannelUrl)
             if (direct.startsWith("ERROR:")) {
-                b.progress.visibility = View.GONE
-                b.error.text = direct
-                b.error.visibility = View.VISIBLE
+                handleError() // Ошибка резолва
                 return@launch
             }
             play(direct)
@@ -63,20 +78,36 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun play(m3u8: String) {
+        player?.release()
+
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
 
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(10000, 30000, 1500, 3000)
+            .build()
+
         trackSelector = DefaultTrackSelector(this)
         player = ExoPlayer.Builder(this)
             .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
             .build().apply {
                 setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
                 playWhenReady = true
                 prepare()
+                
                 addListener(object : Player.Listener {
                     override fun onTracksChanged(tracks: Tracks) {
                         updateQualityButton(tracks)
+                        // Если видео пошло — сбрасываем счетчик ошибок
+                        retryCount = 0
+                        b.progress.visibility = View.GONE
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        super.onPlayerError(error)
+                        handleError() // Ошибка воспроизведения
                     }
                 })
             }
@@ -111,7 +142,26 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    // --- ЛОГИКА ТАЙМЕРА СНА ---
+    // --- ЛОГИКА АВТО-РЕТРАЯ ---
+    private fun handleError() {
+        if (retryCount < MAX_RETRIES) {
+            retryCount++
+            b.progress.visibility = View.VISIBLE // Показываем кружок загрузки
+            // Ждем 2 секунды и пробуем снова
+            handler.postDelayed({
+                startPlayback()
+            }, RETRY_DELAY)
+        } else {
+            // Попытки кончились — показываем страшную кнопку
+            b.progress.visibility = View.GONE
+            b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES\nПроверьте интернет."
+            b.errorLayout.visibility = View.VISIBLE
+            b.controlsOverlay.visibility = View.GONE
+            b.btnQuality.visibility = View.GONE
+            b.btnSleepTimer.visibility = View.GONE
+        }
+    }
+
     private fun showSleepTimerDialog() {
         val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
         val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
@@ -132,10 +182,9 @@ class PlayerActivity : AppCompatActivity() {
                 val m = millisUntilFinished / 1000 / 60
                 val s = (millisUntilFinished / 1000) % 60
                 b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s)
-                b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B")) // Желтый
+                b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
             }
             override fun onFinish() {
-                // ПОЛНОЕ ЗАВЕРШЕНИЕ ПРИЛОЖЕНИЯ
                 finishAndRemoveTask()
                 android.os.Process.killProcess(android.os.Process.myPid())
             }
@@ -149,14 +198,13 @@ class PlayerActivity : AppCompatActivity() {
         b.btnSleepTimer.text = "Сон: Выкл"
         b.btnSleepTimer.setTextColor(Color.WHITE)
     }
-    // -------------------------
 
     private fun showControls() {
         b.controlsOverlay.visibility = View.VISIBLE
         b.btnQuality.visibility = View.VISIBLE
         b.btnSleepTimer.visibility = View.VISIBLE
         handler.removeCallbacks(hideControlsRunnable)
-        handler.postDelayed(hideControlsRunnable, 4000) // Скрыть через 4 секунды
+        handler.postDelayed(hideControlsRunnable, 4000)
     }
 
     private fun updateQualityButton(tracks: Tracks) {
@@ -195,8 +243,8 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        handler.removeCallbacks(hideControlsRunnable)
-        sleepTimer?.cancel() // Обязательно отменяем таймер при выходе
+        handler.removeCallbacksAndMessages(null)
+        sleepTimer?.cancel()
         player?.release()
         player = null
     }
