@@ -11,37 +11,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40          # ← запас на первый долгий прогон Chaquopy
+    timeout-minutes: 40
 
     steps:
-      - name: "🩺 Диагностика окружения"
-        run: |
-          echo "::group::Версии инструментов"
-          echo "🕒 Время: $(date -u)"
-          echo "🖥  Runner: $RUNNER_OS / $RUNNER_ARCH"
-          echo "📦 Репозиторий: ${{ github.repository }}"
-          echo "🌿 Ветка: ${{ github.ref_name }}"
-          echo ""
-          echo "── Java ──"
-          java -version 2>&1 || echo "❌ Java не найдена"
-          echo ""
-          echo "── Gradle ──"
-          gradle --version 2>&1 | head -10 || echo "❌ Gradle не найден"
-          echo ""
-          echo "── Android SDK ──"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls -1 "$ANDROID_HOME" 2>/dev/null || echo "❌ ANDROID_HOME пуст"
-          echo ""
-          echo "── NDK (если есть) ──"
-          ls -1 "$ANDROID_HOME/ndk" 2>/dev/null || echo "NDK не установлен"
-          echo ""
-          echo "── Свободное место ──"
-          df -h / | tail -1
-          echo "::endgroup::"
-
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-java@v4
@@ -53,593 +27,79 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: "🤖 Android SDK"
-        id: setup-android
-        uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@v4
         with:
           packages: ''
           accept-android-sdk-licenses: true
 
-      - name: "📜 Принятие лицензий SDK"
+      - name: Accept licenses
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      # ═══ Патчи (применяются и коммитятся один раз) ═══
+      - name: Patch files
         run: |
-          echo "Принимаем лицензии..."
-          yes | sdkmanager --licenses > /tmp/licenses.log 2>&1 || true
-          ACCEPTED=$(grep -c "Accept" /tmp/licenses.log || echo 0)
-          echo "✅ Принято/подтверждено лицензий: $ACCEPTED"
+          # 1) Снимаем фиксацию версии yt-dlp — ставим самую свежую
+          sed -i 's/install("yt-dlp==[^"]*")/install("yt-dlp")/' app/build.gradle
+          sed -i 's/yt-dlp==[0-9.]*/yt-dlp/' app/src/main/assets/requirements.txt 2>/dev/null || true
 
-      - name: "🧹 Полная очистка старых файлов"
-        run: |
-          echo "::group::Что удаляем"
-          echo "СОХРАНЯЕМ:"
-          echo "  ✓ .git/"
-          echo "  ✓ .github/workflows/bootstrap-and-build.yml"
-          echo "  ✓ keystore.jks"
-          echo ""
-          echo "УДАЛЯЕМ ВСЁ ОСТАЛЬНОЕ:"
-          echo "::endgroup::"
-
-          echo "::group::Удаление"
-          for d in app build .gradle gradle .idea; do
-            if [ -d "$d" ]; then
-              rm -rf "$d"
-              echo "  🗑 Удалено: $d/"
-            fi
-          done
-
-          for f in settings.gradle build.gradle gradle.properties local.properties \
-                   gradlew gradlew.bat gradle.properties.bak app.properties; do
-            if [ -e "$f" ]; then
-              rm -f "$f"
-              echo "  🗑 Удалено: $f"
-            fi
-          done
-
-          if [ -d ".github/workflows" ]; then
-            find .github/workflows -maxdepth 1 -type f ! -name "bootstrap-and-build.yml" -delete 2>/dev/null || true
-            echo "  🗑 Старые workflow удалены"
-          fi
-
-          if [ -f keystore.jks ]; then
-            echo "  🔑 Сохранён: keystore.jks"
-          else
-            echo "  ℹ️  keystore.jks отсутствует — будет сгенерирован заново"
-          fi
-          echo "::endgroup::"
-
-          echo "::group::Содержимое репозитория после очистки"
-          ls -la
-          echo ""
-          echo "── .github/workflows ──"
-          ls -la .github/workflows 2>/dev/null || echo "пусто"
-          echo "::endgroup::"
-
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "ℹ️  Нечего очищать — репозиторий уже чист"
-          else
-            echo "💾 Коммитим очистку..."
-            git commit -m "cleanup: remove old files before rebuild"
-            git push || echo "::warning::git push не удался (не критично)"
-          fi
-
-          {
-            echo "### 🧹 Очистка выполнена"
-            echo ""
-            echo "Удалены старые файлы проекта. Сохранены:"
-            echo "- \`keystore.jks\` (для обновлений)"
-            echo "- \`.github/workflows/bootstrap-and-build.yml\`"
-          } >> $GITHUB_STEP_SUMMARY
-
-      - name: "🏗  Генерация файлов проекта"
-        run: |
-          set -e
-          echo "::group::Создание структуры папок"
-          mkdir -p .github/workflows \
-                   app/src/main/java/com/tvplayer/app \
-                   app/src/main/python \
-                   app/src/main/assets \
-                   app/src/main/res/layout \
-                   app/src/main/res/values \
-                   app/src/main/res/xml \
-                   app/src/main/res/drawable \
-                   app/src/main/res/mipmap-anydpi-v26
-          echo "✅ Папки созданы"
-          echo "::endgroup::"
-
-          # ── Gradle ──
-          cat > settings.gradle << 'EOF'
-          pluginManagement {
-              repositories { google(); mavenCentral(); gradlePluginPortal() }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-              repositories { google(); mavenCentral() }
-          }
-          rootProject.name = "TVPlayer"
-          include(":app")
-          EOF
-
-          cat > gradle.properties << 'EOF'
-          android.useAndroidX=true
-          android.nonTransitiveRClass=true
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          EOF
-
-          cat > build.gradle << 'EOF'
-          plugins {
-              id("com.android.application") version "8.5.0" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-              id("com.chaquo.python") version "16.1.0" apply false
-          }
-          EOF
-
-          # ⚠️ ИСПРАВЛЕНО: minifyEnabled false (Groovy DSL)
-          cat > app/build.gradle << 'EOF'
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-              id("com.chaquo.python")
-          }
-
-          android {
-              namespace = "com.tvplayer.app"
-              compileSdk = 34
-              ndkVersion = "26.1.10909125"
-
-              defaultConfig {
-                  applicationId = "com.tvplayer.app"
-                  minSdk = 24
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
-                  ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
-              }
-              signingConfigs {
-                  create("release") {
-                      storeFile = file("${rootDir}/keystore.jks")
-                      storePassword = "tvplayer123"
-                      keyAlias = "tvplayer"
-                      keyPassword = "tvplayer123"
-                  }
-              }
-              buildTypes {
-                  release {
-                      signingConfig = signingConfigs.getByName("release")
-                      minifyEnabled false
-                  }
-              }
-              buildFeatures { viewBinding = true }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions { jvmTarget = "17" }
-              sourceSets {
-                  getByName("main") { python.srcDirs("src/main/python") }
-              }
-          }
-
-          chaquopy {
-              defaultConfig {
-                  version = "3.11"
-                  pip { install("yt-dlp==2024.12.13") }
-              }
-          }
-
-          dependencies {
-              implementation("androidx.media3:media3-exoplayer:1.4.1")
-              implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
-              implementation("androidx.media3:media3-ui:1.4.1")
-              implementation("com.squareup.okhttp3:okhttp:4.12.0")
-              implementation("io.coil-kt:coil:2.6.0")
-              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-              implementation("androidx.core:core-ktx:1.13.1")
-              implementation("androidx.appcompat:appcompat:1.7.0")
-              implementation("androidx.recyclerview:recyclerview:1.3.2")
-              implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-              implementation("androidx.lifecycle:lifecycle-service:2.8.3")
-          }
-          EOF
-
-          # ── Манифест ──
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-              <uses-feature android:name="android.software.leanback" android:required="false" />
-              <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-              <application
-                  android:allowBackup="false"
-                  android:icon="@mipmap/ic_launcher"
-                  android:label="@string/app_name"
-                  android:networkSecurityConfig="@xml/network_security_config"
-                  android:usesCleartextTraffic="true"
-                  android:theme="@style/Theme.TVPlayer">
-                  <activity android:name=".MainActivity" android:exported="true"
-                      android:screenOrientation="sensorLandscape">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-                  <activity android:name=".PlayerActivity" android:exported="false"
-                      android:screenOrientation="sensorLandscape" />
-                  <service android:name=".PlaybackService" android:exported="false"
-                      android:foregroundServiceType="mediaPlayback" />
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/res/xml/network_security_config.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <network-security-config>
-              <base-config cleartextTrafficPermitted="true" />
-          </network-security-config>
-          EOF
-
-          # ── Assets ──
-          cat > app/src/main/assets/vk_config.json << 'EOF'
-          {
-            "categories": ["23c1873d-c51b-498a-a336-843a852fbd85"],
-            "channels": [
-              { "name": "Эфир VK Video 1", "url": "https://vkvideo.ru/video-217672812_456239544", "logo": "" },
-              { "name": "Эфир VK Video 2", "url": "https://vkvideo.ru/video-217672812_456239671", "logo": "" }
-            ]
-          }
-          EOF
-
-          cat > app/src/main/assets/requirements.txt << 'EOF'
-          yt-dlp==2024.12.13
-          EOF
-
-          cat > app/src/main/python/resolver.py << 'EOF'
+          # 2) Подробный resolver.py: пробует несколько форматов, возвращает полную ошибку
+          cat > app/src/main/python/resolver.py << 'PYEOF'
           import yt_dlp
+
           HEADERS = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
               "Referer": "https://vk.com/",
               "Origin":  "https://vk.com",
           }
+
           def resolve(url):
-              opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                      "format": "best[protocol^=m3u8]/best", "http_headers": HEADERS}
-              try:
-                  with yt_dlp.YoutubeDL(opts) as ydl:
-                      info = ydl.extract_info(url, download=False)
-                  for f in info.get("formats", []):
-                      if f.get("protocol") == "m3u8" and f.get("url"):
-                          return f["url"]
-                  return info.get("url")
-              except Exception as e:
-                  return "ERROR:" + str(e)
-          EOF
-
-          # ── Resources: values ──
-          cat > app/src/main/res/values/strings.xml << 'EOF'
-          <resources>
-              <string name="app_name">TV Player</string>
-              <string name="loading">Загрузка каналов…</string>
-              <string name="resolving">Получаем поток…</string>
-              <string name="error_load">Не удалось загрузить список</string>
-              <string name="error_resolve">Не удалось получить поток</string>
-              <string name="retry">Повторить</string>
-              <string name="exit">Выход</string>
-              <string name="refresh">Обновить</string>
-          </resources>
-          EOF
-
-          cat > app/src/main/res/values/colors.xml << 'EOF'
-          <resources>
-              <color name="bg">#FF0E1116</color>
-              <color name="tile_bg">#FF1A1F27</color>
-              <color name="tile_focus">#FF3B82F6</color>
-              <color name="text">#FFFFFFFF</color>
-              <color name="text_dim">#FFB0B6C0</color>
-          </resources>
-          EOF
-
-          cat > app/src/main/res/values/themes.xml << 'EOF'
-          <resources>
-              <style name="Theme.TVPlayer" parent="Theme.AppCompat.NoActionBar">
-                  <item name="android:windowBackground">@color/bg</item>
-                  <item name="android:statusBarColor">@color/bg</item>
-                  <item name="android:navigationBarColor">@color/bg</item>
-                  <item name="android:textColor">@color/text</item>
-              </style>
-          </resources>
-          EOF
-
-          # ── Resources: drawable/mipmap ──
-          cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M30,32h48v36h-48z"
-                  android:strokeColor="#FFFFFFFF" android:strokeWidth="3" />
-              <path android:fillColor="#FFFFFFFF" android:pathData="M48,42l16,8l-16,8z" />
-          </vector>
-          EOF
-
-          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/tile_bg" />
-              <foreground android:drawable="@drawable/ic_launcher_foreground" />
-          </adaptive-icon>
-          EOF
-
-          cat > app/src/main/res/drawable/tile_selector.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <selector xmlns:android="http://schemas.android.com/apk/res/android">
-              <item android:state_focused="true">
-                  <shape android:shape="rectangle">
-                      <solid android:color="@color/tile_bg" />
-                      <stroke android:width="3dp" android:color="@color/tile_focus" />
-                      <corners android:radius="8dp" />
-                  </shape>
-              </item>
-              <item>
-                  <shape android:shape="rectangle">
-                      <solid android:color="@color/tile_bg" />
-                      <corners android:radius="8dp" />
-                  </shape>
-              </item>
-          </selector>
-          EOF
-
-          # ── Resources: layouts ──
-          cat > app/src/main/res/layout/item_channel.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent" android:layout_height="wrap_content"
-              android:orientation="vertical" android:padding="8dp"
-              android:focusable="true" android:focusableInTouchMode="true"
-              android:background="@drawable/tile_selector" android:clickable="true">
-              <ImageView android:id="@+id/logo" android:layout_width="match_parent"
-                  android:layout_height="120dp" android:scaleType="centerCrop"
-                  android:background="@color/tile_bg" />
-              <TextView android:id="@+id/name" android:layout_width="match_parent"
-                  android:layout_height="wrap_content" android:paddingTop="6dp"
-                  android:maxLines="2" android:ellipsize="end"
-                  android:textColor="@color/text" android:textSize="14sp" />
-          </LinearLayout>
-          EOF
-
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <androidx.constraintlayout.widget.ConstraintLayout
-              xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent" android:layout_height="match_parent"
-              android:background="@color/bg">
-              <TextView android:id="@+id/title" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:text="@string/app_name"
-                  android:textColor="@color/text" android:textSize="20sp" android:padding="16dp"
-                  app:layout_constraintTop_toTopOf="parent" app:layout_constraintStart_toStartOf="parent" />
-              <Button android:id="@+id/btnRefresh" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:text="@string/refresh"
-                  app:layout_constraintTop_toTopOf="parent" app:layout_constraintEnd_toEndOf="parent"
-                  android:layout_margin="8dp" />
-              <Button android:id="@+id/btnExit" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:text="@string/exit"
-                  app:layout_constraintTop_toTopOf="parent" app:layout_constraintEnd_toStartOf="@id/btnRefresh"
-                  android:layout_margin="8dp" />
-              <androidx.recyclerview.widget.RecyclerView android:id="@+id/recycler"
-                  android:layout_width="0dp" android:layout_height="0dp"
-                  android:padding="8dp" android:clipToPadding="false"
-                  app:layout_constraintTop_toBottomOf="@id/title"
-                  app:layout_constraintBottom_toBottomOf="parent"
-                  app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" />
-              <ProgressBar android:id="@+id/progress" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  app:layout_constraintTop_toTopOf="@id/recycler"
-                  app:layout_constraintBottom_toBottomOf="@id/recycler"
-                  app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" />
-              <TextView android:id="@+id/error" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:textColor="@color/text_dim"
-                  android:visibility="gone"
-                  app:layout_constraintTop_toTopOf="@id/recycler"
-                  app:layout_constraintBottom_toBottomOf="@id/recycler"
-                  app:layout_constraintStart_toStartOf="parent" app:layout_constraintEnd_toEndOf="parent" />
-          </androidx.constraintlayout.widget.ConstraintLayout>
-          EOF
-
-          cat > app/src/main/res/layout/activity_player.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent" android:layout_height="match_parent"
-              android:background="#000000">
-              <androidx.media3.ui.PlayerView android:id="@+id/playerView"
-                  android:layout_width="match_parent" android:layout_height="match_parent"
-                  android:keepScreenOn="true" />
-              <ProgressBar android:id="@+id/progress" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:layout_gravity="center" />
-              <TextView android:id="@+id/error" android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:layout_gravity="center"
-                  android:textColor="@color/text_dim" android:visibility="gone" />
-          </FrameLayout>
-          EOF
-
-          # ── Kotlin ──
-          cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
-          package com.tvplayer.app
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
-          import okhttp3.OkHttpClient
-          import okhttp3.Request
-          import org.json.JSONObject
-          import java.util.UUID
-          import java.util.concurrent.TimeUnit
-          data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live")
-          private val client = OkHttpClient.Builder()
-              .connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
-          private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
-              withContext(Dispatchers.IO) {
-                  val result = mutableListOf<Channel>()
-                  try {
-                      val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/" +
-                              "category/$categoryId/stream/?limit=100"
-                      val req = Request.Builder().url(url)
-                          .header("User-Agent", UA)
-                          .header("Accept", "application/json, text/plain, */*")
-                          .header("Origin", "https://live.vkvideo.ru")
-                          .header("Referer", "https://live.vkvideo.ru/")
-                          .header("X-App", "streams_web")
-                          .header("X-From-Id", UUID.randomUUID().toString()).build()
-                      client.newCall(req).execute().use { resp ->
-                          val body = resp.body?.string().orEmpty()
-                          if (resp.isSuccessful && body.isNotBlank()) {
-                              val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
-                              if (streams != null) for (i in 0 until streams.length()) {
-                                  val blog = streams.optJSONObject(i)?.optJSONObject("blog") ?: continue
-                                  val blogUrl = blog.optString("blogUrl"); if (blogUrl.isBlank()) continue
-                                  val raw = blog.optString("title").ifBlank {
-                                      blog.optJSONObject("owner")?.optString("displayName").orEmpty()
-                                  }.ifBlank { blogUrl }
-                                  val name = if (raw.length > 60) raw.take(60) + "…" else raw
-                                  val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null }
-                                      ?: blog.optString("coverUrl")
-                                  result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
-                              }
-                          }
+              errors = []
+              for fmt in ["best[protocol^=m3u8]/best", "best", "all"]:
+                  try:
+                      opts = {
+                          "quiet": True, "no_warnings": True, "skip_download": True,
+                          "format": fmt, "http_headers": HEADERS,
                       }
-                  } catch (_: Exception) {}
-                  result + manual
-              }
-          EOF
+                      with yt_dlp.YoutubeDL(opts) as ydl:
+                          info = ydl.extract_info(url, download=False)
+                      for f in info.get("formats", []):
+                          proto = f.get("protocol", "") or ""
+                          if proto.startswith("m3u8") and f.get("url"):
+                              return f["url"]
+                      if info.get("url"):
+                          return info["url"]
+                      protocols = [f.get("protocol") for f in info.get("formats", [])]
+                      errors.append(f"{fmt}: url пустой, protocols={protocols}")
+                  except Exception as e:
+                      errors.append(f"{fmt}: {e}")
+              return "ERROR: " + " || ".join(errors)
+          PYEOF
 
-          cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'EOF'
+          # 3) StreamResolver: пропускает ошибку наружу
+          cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'KTEOF'
           package com.tvplayer.app
+
           import com.chaquo.python.Python
           import kotlinx.coroutines.Dispatchers
           import kotlinx.coroutines.withContext
+
           object StreamResolver {
-              suspend fun resolve(url: String): String? = withContext(Dispatchers.IO) {
+              suspend fun resolve(url: String): String = withContext(Dispatchers.IO) {
                   try {
                       val m = Python.getInstance().getModule("resolver")
-                      val r = m.callAttr("resolve", url).toString()
-                      if (r.startsWith("ERROR:")) null else r
-                  } catch (_: Exception) { null }
-              }
-          }
-          EOF
-
-          cat > app/src/main/java/com/tvplayer/app/PlaybackService.kt << 'EOF'
-          package com.tvplayer.app
-          import android.app.*
-          import android.content.Intent
-          import android.os.IBinder
-          class PlaybackService : Service() {
-              override fun onCreate() {
-                  super.onCreate()
-                  val ch = NotificationChannel("playback", "Playback", NotificationManager.IMPORTANCE_LOW)
-                  (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(ch)
-                  val n = Notification.Builder(this, "playback")
-                      .setContentTitle("TV Player").setContentText("Идёт воспроизведение")
-                      .setSmallIcon(android.R.drawable.ic_media_play).build()
-                  startForeground(1, n)
-              }
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
-              override fun onBind(intent: Intent?): IBinder? = null
-          }
-          EOF
-
-          cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
-          package com.tvplayer.app
-          import android.view.*
-          import android.widget.ImageView
-          import android.widget.TextView
-          import androidx.recyclerview.widget.RecyclerView
-          import coil.load
-          class ChannelAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit)
-              : RecyclerView.Adapter<ChannelAdapter.VH>() {
-              class VH(v: View) : RecyclerView.ViewHolder(v) {
-                  val logo: ImageView = v.findViewById(R.id.logo)
-                  val name: TextView = v.findViewById(R.id.name)
-              }
-              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH =
-                  VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
-              override fun onBindViewHolder(h: VH, pos: Int) {
-                  val ch = items[pos]
-                  h.name.text = ch.name
-                  if (ch.logo.isNotBlank()) h.logo.load(ch.logo) else h.logo.setImageDrawable(null)
-                  h.itemView.setOnClickListener { onClick(ch) }
-              }
-              override fun getItemCount() = items.size
-          }
-          EOF
-
-          cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
-          package com.tvplayer.app
-          import android.content.Intent
-          import android.os.Bundle
-          import android.view.View
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.lifecycle.lifecycleScope
-          import androidx.recyclerview.widget.GridLayoutManager
-          import com.tvplayer.app.databinding.ActivityMainBinding
-          import kotlinx.coroutines.launch
-          import org.json.JSONObject
-          class MainActivity : AppCompatActivity() {
-              private lateinit var b: ActivityMainBinding
-              override fun onCreate(s: Bundle?) {
-                  super.onCreate(s)
-                  b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
-                  b.recycler.layoutManager = GridLayoutManager(this, 3)
-                  b.btnRefresh.setOnClickListener { load() }
-                  b.btnExit.setOnClickListener { exitApp() }
-                  load()
-              }
-              private fun exitApp() {
-                  finishAndRemoveTask()
-                  android.os.Process.killProcess(android.os.Process.myPid())
-              }
-              private fun load() {
-                  b.progress.visibility = View.VISIBLE
-                  b.error.visibility = View.GONE
-                  b.recycler.visibility = View.GONE
-                  lifecycleScope.launch {
-                      val (manual, cat) = readConfig()
-                      val list = loadChannels(cat, manual)
-                      b.progress.visibility = View.GONE
-                      if (list.isEmpty()) {
-                          b.error.text = getString(R.string.error_load)
-                          b.error.visibility = View.VISIBLE; return@launch
-                      }
-                      b.recycler.visibility = View.VISIBLE
-                      b.recycler.adapter = ChannelAdapter(list) { ch ->
-                          startActivity(Intent(this@MainActivity, PlayerActivity::class.java)
-                              .putExtra("url", ch.url).putExtra("name", ch.name))
-                      }
+                      m.callAttr("resolve", url).toString()
+                  } catch (e: Exception) {
+                      "ERROR: " + (e.message ?: e.toString())
                   }
               }
-              private fun readConfig(): Pair<List<Channel>, String> {
-                  val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
-                  val o = JSONObject(json); val manual = mutableListOf<Channel>()
-                  o.optJSONArray("channels")?.let { arr ->
-                      for (i in 0 until arr.length()) {
-                          val c = arr.getJSONObject(i)
-                          manual.add(Channel(c.optString("name"), c.optString("url"),
-                              c.optString("logo"), c.optString("group", "VK Video")))
-                      }
-                  }
-                  val cats = o.optJSONArray("categories")
-                  return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
-              }
           }
-          EOF
+          KTEOF
 
-          cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
+          # 4) PlayerActivity: показывает текст ошибки в UI
+          cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'KTEOF'
           package com.tvplayer.app
+
           import android.os.Bundle
           import android.view.View
           import androidx.appcompat.app.AppCompatActivity
@@ -650,294 +110,105 @@ jobs:
           import androidx.media3.exoplayer.hls.HlsMediaSource
           import com.tvplayer.app.databinding.ActivityPlayerBinding
           import kotlinx.coroutines.launch
+
           class PlayerActivity : AppCompatActivity() {
               private lateinit var b: ActivityPlayerBinding
               private var player: ExoPlayer? = null
+
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
-                  b = ActivityPlayerBinding.inflate(layoutInflater); setContentView(b.root)
+                  b = ActivityPlayerBinding.inflate(layoutInflater)
+                  setContentView(b.root)
                   val url = intent.getStringExtra("url").orEmpty()
                   b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
                       val direct = StreamResolver.resolve(url)
-                      if (direct == null) {
+                      if (direct.startsWith("ERROR:")) {
                           b.progress.visibility = View.GONE
-                          b.error.text = getString(R.string.error_resolve)
-                          b.error.visibility = View.VISIBLE; return@launch
+                          b.error.text = direct
+                          b.error.visibility = View.VISIBLE
+                          return@launch
                       }
                       play(direct)
                   }
               }
+
               private fun play(m3u8: String) {
                   val http = DefaultHttpDataSource.Factory()
                       .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                      .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
+                      .setDefaultRequestProperties(mapOf(
+                          "Referer" to "https://vk.com/",
+                          "Origin" to "https://vk.com"))
                   player = ExoPlayer.Builder(this).build().apply {
-                      setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
-                      playWhenReady = true; prepare()
+                      setMediaSource(HlsMediaSource.Factory(http)
+                          .createMediaSource(MediaItem.fromUri(m3u8)))
+                      playWhenReady = true
+                      prepare()
                   }
-                  b.playerView.player = player; b.progress.visibility = View.GONE
+                  b.playerView.player = player
+                  b.progress.visibility = View.GONE
               }
+
               override fun onDestroy() {
-                  super.onDestroy(); player?.release(); player = null
+                  super.onDestroy()
+                  player?.release()
+                  player = null
                   finishAndRemoveTask()
               }
           }
-          EOF
+          KTEOF
 
-          # ── Коммитим ──
-          echo "::group::Git commit"
+          # Коммитим патчи, чтобы не применять каждый раз
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "bootstrap: generate project files" || echo "ℹ️  Нечего коммитить"
-          git push || echo "::warning::git push не выполнен"
-          echo "::endgroup::"
-          echo "✅ Все файлы проекта созданы"
-
-      - name: "🔎 Проверка файлов проекта"
-        run: |
-          echo "::group::Проверка структуры проекта"
-          REQUIRED=(
-            "settings.gradle"
-            "gradle.properties"
-            "build.gradle"
-            "app/build.gradle"
-            "app/src/main/AndroidManifest.xml"
-            "app/src/main/assets/vk_config.json"
-            "app/src/main/assets/requirements.txt"
-            "app/src/main/python/resolver.py"
-            "app/src/main/java/com/tvplayer/app/MainActivity.kt"
-            "app/src/main/java/com/tvplayer/app/PlayerActivity.kt"
-            "app/src/main/java/com/tvplayer/app/ChannelAdapter.kt"
-            "app/src/main/java/com/tvplayer/app/VkApi.kt"
-            "app/src/main/java/com/tvplayer/app/StreamResolver.kt"
-            "app/src/main/java/com/tvplayer/app/PlaybackService.kt"
-            "app/src/main/res/layout/activity_main.xml"
-            "app/src/main/res/layout/activity_player.xml"
-            "app/src/main/res/layout/item_channel.xml"
-            "app/src/main/res/values/strings.xml"
-            "app/src/main/res/values/colors.xml"
-            "app/src/main/res/values/themes.xml"
-          )
-          MISSING=()
-          for f in "${REQUIRED[@]}"; do
-            if [ -f "$f" ]; then
-              echo "  ✅ $f"
-            else
-              echo "  ❌ $f — ОТСУТСТВУЕТ"
-              MISSING+=("$f")
-              echo "::error title=Отсутствует файл::$f не найден."
-            fi
-          done
-          echo "::endgroup::"
-
-          if [ ${#MISSING[@]} -gt 0 ]; then
-            echo "::error::Не хватает ${#MISSING[@]} файлов."
-            {
-              echo "### ❌ Проверка файлов провалена"
-              echo ""
-              for f in "${MISSING[@]}"; do echo "- \`$f\`"; done
-            } >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
-
-          for section in "chaquopy" "signingConfigs" "media3-exoplayer" "ndkVersion" "minifyEnabled"; do
-            if grep -q "$section" app/build.gradle; then
-              echo "  ✅ build.gradle содержит '$section'"
-            else
-              echo "  ❌ build.gradle НЕ содержит '$section'"
-              echo "::error::app/build.gradle не содержит '$section'"
-              exit 1
-            fi
-          done
-
-          {
-            echo "### ✅ Проверка файлов пройдена"
-            echo ""
-            echo "Все ${#REQUIRED[@]} файлов на месте, ключевые секции в build.gradle присутствуют."
-          } >> $GITHUB_STEP_SUMMARY
-
-      - name: "🔑 Keystore"
-        run: |
-          if [ ! -f "keystore.jks" ]; then
-            echo "Генерируем keystore..."
-            keytool -genkey -v -keystore keystore.jks \
-              -alias tvplayer -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass tvplayer123 -keypass tvplayer123 \
-              -dname "CN=TVPlayer, OU=Dev, O=Dev, L=City, S=State, C=RU"
-            git add keystore.jks
-            git commit -m "add keystore" || true
-            git push || echo "::warning::push keystore не удался"
-            echo "### 🔑 Keystore создан" >> $GITHUB_STEP_SUMMARY
+          if git diff --cached --quiet; then
+            echo "ℹ️ Патчи уже применены"
           else
-            echo "✅ keystore.jks уже существует"
-            echo "### 🔑 Keystore найден" >> $GITHUB_STEP_SUMMARY
+            git commit -m "fix: update yt-dlp, add error reporting"
+            git push
+            echo "✅ Патчи применены и закоммичены"
           fi
 
-      - name: "🔨 Сборка Release APK"
+      # ═══ Сборка ═══
+      - name: "🔨 Build APK"
         id: build
         run: |
-          echo "::group::Gradle assembleRelease (--info)"
           set +e
-          gradle assembleRelease --no-daemon --stacktrace --warning-mode all --info 2>&1 | tee /tmp/gradle_build.log
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_build.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
-          echo "::endgroup::"
-
           if [ $EXIT_CODE -ne 0 ]; then
-            echo ""
-            echo "══════════ ОШИБКА СБОРКИ ══════════"
-            echo "Gradle завершился с кодом $EXIT_CODE"
-            echo ""
-            echo "─── What went wrong ───"
-            grep -A 40 "What went wrong" /tmp/gradle_build.log | head -50 || tail -80 /tmp/gradle_build.log
-            echo ""
-            echo "─── Последние 80 строк лога ───"
-            tail -80 /tmp/gradle_build.log
-            echo ""
-            echo "─── Подсказки ───"
-            if grep -q "Could not resolve\|Could not find" /tmp/gradle_build.log; then
-              echo "💡 Проблема с зависимостями (Maven)."
-            fi
-            if grep -qi "chaquopy\|python\|pip" /tmp/gradle_build.log; then
-              echo "💡 Что-то с Chaquopy/Python/yt-dlp."
-              grep -i "chaquopy\|python\|pip" /tmp/gradle_build.log | tail -10 || true
-            fi
-            if grep -q "SDK location not found\|ANDROID_HOME" /tmp/gradle_build.log; then
-              echo "💡 Проблема с Android SDK."
-            fi
-            if grep -q "NDK\|ndk" /tmp/gradle_build.log; then
-              echo "💡 Проблема с NDK."
-              grep -i "ndk" /tmp/gradle_build.log | tail -5 || true
-            fi
-            if grep -q "Execution failed for task" /tmp/gradle_build.log; then
-              echo "💡 Упавшая задача: $(grep 'Execution failed for task' /tmp/gradle_build.log | head -1)"
-            fi
-
+            echo "─── Что упало ───"
+            grep -A 20 "What went wrong" /tmp/gradle_build.log | head -25
+            tail -50 /tmp/gradle_build.log
             {
-              echo "### ❌ Сборка APK провалена"
-              echo ""
-              echo "**Код выхода:** $EXIT_CODE"
-              echo ""
-              echo "**What went wrong:**"
+              echo "### ❌ Сборка упала"
               echo '```'
-              grep -A 15 "What went wrong" /tmp/gradle_build.log | head -20 || tail -40 /tmp/gradle_build.log
+              grep -A 15 "What went wrong" /tmp/gradle_build.log | head -20
               echo '```'
             } >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
+          echo "✅ Gradle OK"
 
-          echo "✅ Gradle завершился успешно"
-          echo "### ✅ Сборка APK прошла успешно" >> $GITHUB_STEP_SUMMARY
-
-      - name: "📦 Проверка APK"
+      - name: "📦 Prepare APK"
         id: apk
         run: |
           SRC=$(find app/build/outputs/apk/release -name "*.apk" -type f | head -1)
-          if [ -z "$SRC" ]; then
-            echo "::error title=APK не найден::Gradle отработал, но APK отсутствует."
-            echo "### ❌ APK не найден" >> $GITHUB_STEP_SUMMARY
-            ls -la app/build/outputs/apk/ 2>/dev/null || echo "Папка пуста"
-            exit 1
-          fi
-
-          SIZE_BYTES=$(stat -c%s "$SRC")
-          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1048576" | bc)
-          SHA=$(sha256sum "$SRC" | awk '{print $1}')
-
-          if [ "$SIZE_BYTES" -lt 1048576 ]; then
-            echo "::error title=APK подозрительно мал::Размер $SIZE_MB МБ"
-            exit 1
-          fi
-
           V=$(grep 'versionName' app/build.gradle | head -1 | awk -F'"' '{print $2}')
           TAG="v${V}-$(date +%Y%m%d-%H%M)"
           FILE="TVPlayer_${TAG}.apk"
           cp "$SRC" "$FILE"
-
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "file=$FILE" >> $GITHUB_OUTPUT
-          echo "size=$SIZE_MB" >> $GITHUB_OUTPUT
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "✅ $FILE ($(du -h "$FILE" | cut -f1))"
 
-          echo "✅ APK: $FILE ($SIZE_MB МБ)"
-          {
-            echo "### 📦 APK готов"
-            echo ""
-            echo "| Параметр | Значение |"
-            echo "|---|---|"
-            echo "| Файл | \`$FILE\` |"
-            echo "| Версия | $V |"
-            echo "| Размер | $SIZE_MB МБ |"
-            echo "| SHA256 | \`$SHA\` |"
-          } >> $GITHUB_STEP_SUMMARY
-
-      - name: "🚀 Публикация в Releases"
-        if: success()
+      - name: "🚀 Release"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
           name: TV Player ${{ steps.apk.outputs.tag }}
-          body: |
-            ## TV Player ${{ steps.apk.outputs.version }}
-
-            📦 **Размер:** ${{ steps.apk.outputs.size }} МБ
-            🔐 **SHA256:** `${{ steps.apk.outputs.sha }}`
-            🕒 **Собрано:** ${{ github.run_id }}
-
-            ### Установка
-            1. Скачайте APK ниже
-            2. Разрешите установку из неизвестных источников
-            3. Установите (поверх старой версии — данные сохранятся)
-
-            ### Что внутри
-            - VK Live (категория) — авто-список каналов
-            - 2 ручных канала из `vk_config.json`
-            - Резолвер: yt-dlp (Python/Chaquopy)
-            - Плеер: ExoPlayer (Media3)
           files: ${{ steps.apk.outputs.file }}
-          generate_release_notes: false
           make_latest: true
-
-      - name: "✅ Ссылка на релиз"
-        if: success()
-        run: |
-          URL="https://github.com/${{ github.repository }}/releases/tag/${{ steps.apk.outputs.tag }}"
-          echo "::notice title=Релиз опубликован::$URL"
-          {
-            echo ""
-            echo "---"
-            echo "### 🎉 Релиз опубликован"
-            echo ""
-            echo "👉 **[Скачать TVPlayer ${{ steps.apk.outputs.tag }}]($URL)**"
-            echo ""
-            echo "Постоянная ссылка на последнюю версию:"
-            echo "https://github.com/${{ github.repository }}/releases/latest"
-          } >> $GITHUB_STEP_SUMMARY
-
-      - name: "📊 Итоговая сводка"
-        if: always()
-        run: |
-          {
-            echo ""
-            echo "---"
-            echo ""
-            echo "## 📊 Итоговый статус"
-            echo ""
-            echo "| Шаг | Статус |"
-            echo "|---|---|"
-            echo "| Android SDK | ${{ steps.setup-android.outcome == 'success' && '✅' || '⚠️' }} |"
-            echo "| Очистка | ✅ |"
-            echo "| Генерация | ✅ |"
-            echo "| Сборка APK | ${{ steps.build.outcome == 'success' && '✅' || '❌' }} |"
-            echo "| Проверка APK | ${{ steps.apk.outcome == 'success' && '✅' || '❌' }} |"
-          } >> $GITHUB_STEP_SUMMARY
-
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "::notice::Сборка завершена успешно"
-          else
-            echo "::error title=Сборка провалена::Смотри сводку и лог упавшего шага."
-          fi
