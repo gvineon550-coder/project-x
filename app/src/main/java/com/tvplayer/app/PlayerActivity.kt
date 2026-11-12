@@ -1,7 +1,11 @@
 package com.tvplayer.app
 
 import android.app.AlertDialog
+import android.graphics.Color
 import android.os.Bundle
+import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -24,6 +28,14 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var b: ActivityPlayerBinding
     private var player: ExoPlayer? = null
     private lateinit var trackSelector: DefaultTrackSelector
+    private var sleepTimer: CountDownTimer? = null
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val hideControlsRunnable = Runnable {
+        b.controlsOverlay.visibility = View.GONE
+        b.btnQuality.visibility = View.GONE
+        b.btnSleepTimer.visibility = View.GONE
+    }
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
@@ -70,7 +82,81 @@ class PlayerActivity : AppCompatActivity() {
             }
         b.playerView.player = player
         b.progress.visibility = View.GONE
-        b.btnQuality.setOnClickListener { showQualityDialog() }
+        
+        b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+        showControls()
+        
+        b.btnQuality.setOnClickListener { showQualityDialog(); showControls() }
+        b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); showControls() }
+        
+        b.btnPlayPause.setOnClickListener {
+            player?.let { p ->
+                if (p.isPlaying) {
+                    p.pause()
+                    b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
+                } else {
+                    p.play()
+                    b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                }
+            }
+            showControls()
+        }
+        
+        b.touchArea.setOnClickListener { 
+            if (b.controlsOverlay.visibility == View.VISIBLE) {
+                hideControlsRunnable.run()
+            } else {
+                showControls()
+            }
+        }
+    }
+
+    // --- ЛОГИКА ТАЙМЕРА СНА ---
+    private fun showSleepTimerDialog() {
+        val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
+        val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
+        
+        AlertDialog.Builder(this)
+            .setTitle("Таймер сна")
+            .setItems(options) { _, which ->
+                val mins = minutes[which]
+                if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
+            }.show()
+    }
+
+    private fun startSleepTimer(minutes: Int) {
+        sleepTimer?.cancel()
+        val millis = minutes * 60 * 1000L
+        sleepTimer = object : CountDownTimer(millis, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                val m = millisUntilFinished / 1000 / 60
+                val s = (millisUntilFinished / 1000) % 60
+                b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s)
+                b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B")) // Желтый
+            }
+            override fun onFinish() {
+                // ПОЛНОЕ ЗАВЕРШЕНИЕ ПРИЛОЖЕНИЯ
+                finishAndRemoveTask()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
+        }.start()
+        showControls()
+    }
+
+    private fun cancelSleepTimer() {
+        sleepTimer?.cancel()
+        sleepTimer = null
+        b.btnSleepTimer.text = "Сон: Выкл"
+        b.btnSleepTimer.setTextColor(Color.WHITE)
+    }
+    // -------------------------
+
+    private fun showControls() {
+        b.controlsOverlay.visibility = View.VISIBLE
+        b.btnQuality.visibility = View.VISIBLE
+        b.btnSleepTimer.visibility = View.VISIBLE
+        handler.removeCallbacks(hideControlsRunnable)
+        handler.postDelayed(hideControlsRunnable, 4000) // Скрыть через 4 секунды
     }
 
     private fun updateQualityButton(tracks: Tracks) {
@@ -109,6 +195,8 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        handler.removeCallbacks(hideControlsRunnable)
+        sleepTimer?.cancel() // Обязательно отменяем таймер при выходе
         player?.release()
         player = null
     }
