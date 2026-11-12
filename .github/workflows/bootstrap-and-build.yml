@@ -36,7 +36,7 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 1: XML и Манифест (Верстка)
+      # ШАГ 1: XML и Манифест (Верстка с номерами)
       # ═══════════════════════════════════════════════════
       - name: "📦 Генерация XML (Манифест и верстка)"
         run: |
@@ -74,6 +74,7 @@ jobs:
           </manifest>
           EOF
 
+          # Карточка канала с номером
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -87,6 +88,17 @@ jobs:
               android:clickable="true"
               android:layout_marginBottom="4dp"
               android:gravity="center_vertical">
+
+              <!-- Номер канала -->
+              <TextView
+                  android:id="@+id/txtNumber"
+                  android:layout_width="40dp"
+                  android:layout_height="wrap_content"
+                  android:gravity="center"
+                  android:textColor="@color/text_dim"
+                  android:textSize="16sp"
+                  android:textStyle="bold" />
+
               <ImageView
                   android:id="@+id/logo"
                   android:layout_width="80dp"
@@ -343,52 +355,77 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 2: Kotlin (Модели и Список)
+      # ШАГ 2: Python (Авто-логотипы)
       # ═══════════════════════════════════════════════════
-      - name: "🧠 Генерация Kotlin (Модели и Список)"
+      - name: "🐍 Обновление Python (Авто-логотипы)"
         run: |
-          cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
-          package com.tvplayer.app
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
-          import okhttp3.OkHttpClient
-          import okhttp3.Request
-          import org.json.JSONObject
-          import java.util.UUID
-          import java.util.concurrent.TimeUnit
-          data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
-          private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
-          private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
-              withContext(Dispatchers.IO) {
-                  val result = mutableListOf<Channel>()
-                  try {
-                      val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
-                      val req = Request.Builder().url(url)
-                          .header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
-                          .header("Origin", "https://live.vkvideo.ru").header("Referer", "https://live.vkvideo.ru/")
-                          .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
-                      client.newCall(req).execute().use { resp ->
-                          val body = resp.body?.string().orEmpty()
-                          if (resp.isSuccessful && body.isNotBlank()) {
-                              val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
-                              if (streams != null) for (i in 0 until streams.length()) {
-                                  val item = streams.optJSONObject(i) ?: continue
-                                  if (!item.optBoolean("is_online", true)) continue
-                                  val blog = item.optJSONObject("blog") ?: continue
-                                  val blogUrl = blog.optString("blogUrl"); if (blogUrl.isBlank()) continue
-                                  val raw = blog.optString("title").ifBlank { blog.optJSONObject("owner")?.optString("displayName").orEmpty() }.ifBlank { blogUrl }
-                                  val name = if (raw.length > 60) raw.take(60) + "…" else raw
-                                  val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null } ?: blog.optString("coverUrl")
-                                  result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
-                              }
-                          }
-                      }
-                  } catch (_: Exception) {}
-                  result + manual
-              }
+          cat > app/src/main/python/resolver.py << 'EOF'
+          import yt_dlp
+          HEADERS = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Referer": "https://vk.com/",
+              "Origin":  "https://vk.com",
+          }
+          def resolve(url):
+              try:
+                  opts = {"quiet": True, "no_warnings": True, "skip_download": True, "http_headers": HEADERS}
+                  with yt_dlp.YoutubeDL(opts) as ydl:
+                      info = ydl.extract_info(url, download=False)
+                  if info.get("url") and ".m3u8" in info["url"]:
+                      return info["url"]
+                  formats = info.get("formats", [])
+                  for f in formats:
+                      if f.get("protocol") == "m3u8":
+                          u = f.get("url", "")
+                          if "master" in u or "index.m3u8" in u:
+                              return u
+                  best = None; max_h = -1
+                  for f in formats:
+                      if f.get("protocol") == "m3u8":
+                          h = f.get("height") or 0
+                          if h > max_h: max_h = h; best = f
+                  if best: return best["url"]
+                  return info.get("url") or "ERROR: no m3u8 found"
+              except Exception as e:
+                  return "ERROR: " + str(e)
+
+          def get_thumbnail(url):
+              try:
+                  with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "http_headers": HEADERS}) as ydl:
+                      info = ydl.extract_info(url, download=False)
+                      return info.get("thumbnail", "")
+              except Exception:
+                  return ""
           EOF
 
+      # ═══════════════════════════════════════════════════
+      # ШАГ 3: Kotlin (Адаптер с номерами и Логика)
+      # ═══════════════════════════════════════════════════
+      - name: "🧠 Обновление Kotlin (Адаптер и Список)"
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'EOF'
+          package com.tvplayer.app
+          import com.chaquo.python.Python
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          object StreamResolver {
+              suspend fun resolve(url: String): String = withContext(Dispatchers.IO) {
+                  try {
+                      val m = Python.getInstance().getModule("resolver")
+                      m.callAttr("resolve", url).toString()
+                  } catch (e: Exception) { "ERROR: " + (e.message ?: e.toString()) }
+              }
+              suspend fun getThumbnail(url: String): String = withContext(Dispatchers.IO) {
+                  try {
+                      val m = Python.getInstance().getModule("resolver")
+                      m.callAttr("get_thumbnail", url).toString()
+                  } catch (_: Exception) { "" }
+              }
+          }
+          EOF
+
+          # Добавляем обработку номеров в адаптер
           cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
           package com.tvplayer.app
           import android.view.*
@@ -398,6 +435,7 @@ jobs:
           import coil.load
           class ChannelAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit, private val onFavoriteClick: (Channel) -> Unit) : RecyclerView.Adapter<ChannelAdapter.VH>() {
               class VH(v: View) : RecyclerView.ViewHolder(v) {
+                  val txtNumber: TextView = v.findViewById(R.id.txtNumber)
                   val logo: ImageView = v.findViewById(R.id.logo)
                   val name: TextView = v.findViewById(R.id.name)
                   val btnFav: ImageView = v.findViewById(R.id.btnFav)
@@ -405,6 +443,8 @@ jobs:
               override fun onCreateViewHolder(p: ViewGroup, t: Int): VH = VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
               override fun onBindViewHolder(h: VH, pos: Int) {
                   val ch = items[pos]
+                  // Выводим порядковый номер (pos + 1)
+                  h.txtNumber.text = (pos + 1).toString()
                   h.name.text = ch.name
                   if (ch.logo.isNotBlank()) h.logo.load(ch.logo) { crossfade(true); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) } else h.logo.setImageResource(android.R.color.darker_gray)
                   if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
@@ -445,7 +485,13 @@ jobs:
                   b.progress.visibility = View.VISIBLE; b.error.visibility = View.GONE; b.recycler.visibility = View.GONE
                   lifecycleScope.launch {
                       val (manual, cat) = readConfig()
-                      allChannels = loadChannels(cat, manual)
+                      val manualWithLogos = manual.map { ch ->
+                          if (ch.logo.isBlank()) {
+                              val thumb = StreamResolver.getThumbnail(ch.url)
+                              if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                          } else ch
+                      }
+                      allChannels = loadChannels(cat, manualWithLogos)
                       b.progress.visibility = View.GONE
                       if (allChannels.isEmpty()) { b.error.text = getString(R.string.error_load); b.error.visibility = View.VISIBLE; return@launch }
                       updateView()
@@ -456,7 +502,8 @@ jobs:
                   allChannels.forEach { it.isFavorite = favs.contains(it.url) }
                   val sorted = allChannels.sortedByDescending { it.isFavorite }
                   val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
-                  b.txtTitle.text = if (showOnlyFavorites) "Избранное" else "Все каналы"
+                  // Выводим количество каналов в заголовке
+                  b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
                   b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
                   b.recycler.visibility = View.VISIBLE
                   b.recycler.adapter = ChannelAdapter(displayed, { ch ->
@@ -484,9 +531,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin (Плеер и Пульт)
+      # ШАГ 4: Kotlin (Плеер) и Сборка
       # ═══════════════════════════════════════════════════
-      - name: "🎬 Генерация Kotlin (Плеер)"
+      - name: "🎬 Финал (Плеер и версия)"
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
@@ -561,7 +608,10 @@ jobs:
               }
               private fun startPlayback() {
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
-                  b.channelNameOverlay.text = names.getOrNull(currentIndex) ?: "Канал"
+                  // В оверлее показываем номер канала и его название
+                  val chNum = currentIndex + 1
+                  val chName = names.getOrNull(currentIndex) ?: "Канал"
+                  b.channelNameOverlay.text = "$chNum. $chName"
                   b.channelNameOverlay.visibility = View.VISIBLE
                   handler.removeCallbacks(hideChannelOverlayRunnable)
                   handler.postDelayed(hideChannelOverlayRunnable, 3000)
@@ -667,17 +717,12 @@ jobs:
           }
           EOF
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 4: Обновление версии и коммит
-      # ═══════════════════════════════════════════════════
-      - name: "🔢 Версия и коммит"
-        run: |
           RUN_NUMBER="${{ github.run_number }}"
           sed -i "s/versionCode = [0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "release: master build with all features" || echo "no changes"
+          git commit -m "feat: channel numbering and total count" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
