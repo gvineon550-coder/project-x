@@ -36,53 +36,11 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ПОЛНЫЙ ПАТЧ (Исправлена ошибка с атрибутом плеера)
+      # ПАТЧ: Чистый Live-интерфейс + Таймер сна (5м - 5ч)
       # ═══════════════════════════════════════════════════
-      - name: "🎨 Применение всех правок"
+      - name: "📺 Обновление плеера и Таймер сна"
         run: |
-          # 1. ИСПРАВЛЕННЫЙ resolver.py
-          cat > app/src/main/python/resolver.py << 'EOF'
-          import yt_dlp
-          HEADERS = {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Referer": "https://vk.com/",
-              "Origin":  "https://vk.com",
-          }
-          def resolve(url):
-              try:
-                  opts = {
-                      "quiet": True, "no_warnings": True, "skip_download": True,
-                      "http_headers": HEADERS,
-                  }
-                  with yt_dlp.YoutubeDL(opts) as ydl:
-                      info = ydl.extract_info(url, download=False)
-                  
-                  if info.get("url") and ".m3u8" in info["url"]:
-                      return info["url"]
-                      
-                  formats = info.get("formats", [])
-                  for f in formats:
-                      if f.get("protocol") == "m3u8":
-                          u = f.get("url", "")
-                          if "master" in u or "index.m3u8" in u:
-                              return u
-                              
-                  best = None
-                  max_h = -1
-                  for f in formats:
-                      if f.get("protocol") == "m3u8":
-                          h = f.get("height") or 0
-                          if h > max_h:
-                              max_h = h
-                              best = f
-                  if best: return best["url"]
-                  return info.get("url") or "ERROR: no m3u8 found"
-              except Exception as e:
-                  return "ERROR: " + str(e)
-          EOF
-
-          # 2. activity_player.xml (Убрали проблемный атрибут controller_show_timeout_ms)
+          # 1. activity_player.xml (Добавлена кнопка Сон)
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -90,16 +48,60 @@ jobs:
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:background="#000000">
-              
+
               <androidx.media3.ui.PlayerView
                   android:id="@+id/playerView"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
-                  app:show_buffering="when_playing"
-                  app:use_controller="true"
+                  app:use_controller="false"
                   app:resize_mode="zoom"
                   android:keepScreenOn="true" />
-                  
+
+              <!-- Прозрачный слой для кликов -->
+              <View
+                  android:id="@+id/touchArea"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent" />
+
+              <!-- Оверлей с кнопкой Play/Pause -->
+              <LinearLayout
+                  android:id="@+id/controlsOverlay"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:background="#55000000"
+                  android:gravity="center"
+                  android:orientation="vertical"
+                  android:visibility="gone">
+
+                  <ImageView
+                      android:id="@+id/btnPlayPause"
+                      android:layout_width="96dp"
+                      android:layout_height="96dp"
+                      android:src="@android:drawable/ic_media_pause"
+                      app:tint="#FFFFFF"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
+
+              <!-- Кнопка Таймер сна (слева сверху) -->
+              <TextView
+                  android:id="@+id/btnSleepTimer"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|start"
+                  android:layout_margin="24dp"
+                  android:background="#AA000000"
+                  android:paddingHorizontal="16dp"
+                  android:paddingVertical="8dp"
+                  android:text="Сон: Выкл"
+                  android:textColor="#FFFFFF"
+                  android:textSize="16sp"
+                  android:textStyle="bold"
+                  android:clickable="true"
+                  android:focusable="true"
+                  android:visibility="gone" />
+
+              <!-- Наша кнопка качества (справа сверху) -->
               <TextView
                   android:id="@+id/btnQuality"
                   android:layout_width="wrap_content"
@@ -114,14 +116,15 @@ jobs:
                   android:textSize="16sp"
                   android:textStyle="bold"
                   android:clickable="true"
-                  android:focusable="true" />
-                  
+                  android:focusable="true"
+                  android:visibility="gone" />
+
               <ProgressBar
                   android:id="@+id/progress"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="center" />
-                  
+
               <TextView
                   android:id="@+id/error"
                   android:layout_width="wrap_content"
@@ -133,12 +136,16 @@ jobs:
           </FrameLayout>
           EOF
 
-          # 3. PlayerActivity.kt
+          # 2. PlayerActivity.kt (Логика пульта, качества и таймера сна)
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
 
           import android.app.AlertDialog
+          import android.graphics.Color
           import android.os.Bundle
+          import android.os.CountDownTimer
+          import android.os.Handler
+          import android.os.Looper
           import android.view.View
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.view.WindowCompat
@@ -161,6 +168,14 @@ jobs:
               private lateinit var b: ActivityPlayerBinding
               private var player: ExoPlayer? = null
               private lateinit var trackSelector: DefaultTrackSelector
+              private var sleepTimer: CountDownTimer? = null
+
+              private val handler = Handler(Looper.getMainLooper())
+              private val hideControlsRunnable = Runnable {
+                  b.controlsOverlay.visibility = View.GONE
+                  b.btnQuality.visibility = View.GONE
+                  b.btnSleepTimer.visibility = View.GONE
+              }
 
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
@@ -207,7 +222,81 @@ jobs:
                       }
                   b.playerView.player = player
                   b.progress.visibility = View.GONE
-                  b.btnQuality.setOnClickListener { showQualityDialog() }
+                  
+                  b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                  showControls()
+                  
+                  b.btnQuality.setOnClickListener { showQualityDialog(); showControls() }
+                  b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); showControls() }
+                  
+                  b.btnPlayPause.setOnClickListener {
+                      player?.let { p ->
+                          if (p.isPlaying) {
+                              p.pause()
+                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
+                          } else {
+                              p.play()
+                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                          }
+                      }
+                      showControls()
+                  }
+                  
+                  b.touchArea.setOnClickListener { 
+                      if (b.controlsOverlay.visibility == View.VISIBLE) {
+                          hideControlsRunnable.run()
+                      } else {
+                          showControls()
+                      }
+                  }
+              }
+
+              // --- ЛОГИКА ТАЙМЕРА СНА ---
+              private fun showSleepTimerDialog() {
+                  val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
+                  val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
+                  
+                  AlertDialog.Builder(this)
+                      .setTitle("Таймер сна")
+                      .setItems(options) { _, which ->
+                          val mins = minutes[which]
+                          if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
+                      }.show()
+              }
+
+              private fun startSleepTimer(minutes: Int) {
+                  sleepTimer?.cancel()
+                  val millis = minutes * 60 * 1000L
+                  sleepTimer = object : CountDownTimer(millis, 1000) {
+                      override fun onTick(millisUntilFinished: Long) {
+                          val m = millisUntilFinished / 1000 / 60
+                          val s = (millisUntilFinished / 1000) % 60
+                          b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s)
+                          b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B")) // Желтый
+                      }
+                      override fun onFinish() {
+                          // ПОЛНОЕ ЗАВЕРШЕНИЕ ПРИЛОЖЕНИЯ
+                          finishAndRemoveTask()
+                          android.os.Process.killProcess(android.os.Process.myPid())
+                      }
+                  }.start()
+                  showControls()
+              }
+
+              private fun cancelSleepTimer() {
+                  sleepTimer?.cancel()
+                  sleepTimer = null
+                  b.btnSleepTimer.text = "Сон: Выкл"
+                  b.btnSleepTimer.setTextColor(Color.WHITE)
+              }
+              // -------------------------
+
+              private fun showControls() {
+                  b.controlsOverlay.visibility = View.VISIBLE
+                  b.btnQuality.visibility = View.VISIBLE
+                  b.btnSleepTimer.visibility = View.VISIBLE
+                  handler.removeCallbacks(hideControlsRunnable)
+                  handler.postDelayed(hideControlsRunnable, 4000) // Скрыть через 4 секунды
               }
 
               private fun updateQualityButton(tracks: Tracks) {
@@ -246,244 +335,18 @@ jobs:
 
               override fun onDestroy() {
                   super.onDestroy()
+                  handler.removeCallbacks(hideControlsRunnable)
+                  sleepTimer?.cancel() // Обязательно отменяем таймер при выходе
                   player?.release()
                   player = null
               }
           }
           EOF
 
-          # 4. item_channel.xml
-          cat > app/src/main/res/layout/item_channel.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:orientation="horizontal"
-              android:padding="12dp"
-              android:focusable="true"
-              android:focusableInTouchMode="true"
-              android:background="@drawable/tile_selector"
-              android:clickable="true"
-              android:layout_marginBottom="4dp">
-
-              <ImageView
-                  android:id="@+id/logo"
-                  android:layout_width="80dp"
-                  android:layout_height="80dp"
-                  android:scaleType="centerCrop"
-                  android:background="#222222" />
-
-              <TextView
-                  android:id="@+id/name"
-                  android:layout_width="0dp"
-                  android:layout_height="80dp"
-                  android:layout_weight="1"
-                  android:paddingStart="16dp"
-                  android:paddingEnd="8dp"
-                  android:gravity="center_vertical"
-                  android:textColor="@color/text"
-                  android:textSize="18sp"
-                  android:textStyle="bold"
-                  android:maxLines="1"
-                  android:ellipsize="end" />
-          </LinearLayout>
-          EOF
-
-          # 5. activity_main.xml
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <androidx.constraintlayout.widget.ConstraintLayout
-              xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:background="@color/bg">
-
-              <LinearLayout
-                  android:id="@+id/topBar"
-                  android:layout_width="match_parent"
-                  android:layout_height="64dp"
-                  android:orientation="horizontal"
-                  android:background="#1A1A1A"
-                  android:gravity="center_vertical"
-                  android:paddingHorizontal="16dp"
-                  app:layout_constraintTop_toTopOf="parent">
-
-                  <TextView
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:text="Все каналы"
-                      android:textColor="@color/text"
-                      android:textSize="22sp"
-                      android:textStyle="bold" />
-
-                  <TextView
-                      android:id="@+id/btnRefresh"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Обновить"
-                      android:textColor="@color/text_dim"
-                      android:textSize="16sp"
-                      android:padding="12dp"
-                      android:background="?attr/selectableItemBackground" />
-              </LinearLayout>
-
-              <androidx.recyclerview.widget.RecyclerView
-                  android:id="@+id/recycler"
-                  android:layout_width="0dp"
-                  android:layout_height="0dp"
-                  android:padding="8dp"
-                  android:clipToPadding="false"
-                  app:layout_constraintTop_toBottomOf="@id/topBar"
-                  app:layout_constraintBottom_toTopOf="@id/btnExit"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <TextView
-                  android:id="@+id/btnExit"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Выход"
-                  android:textColor="@color/text_dim"
-                  android:textSize="16sp"
-                  android:gravity="center"
-                  android:padding="20dp"
-                  android:background="?attr/selectableItemBackground"
-                  app:layout_constraintBottom_toBottomOf="parent" />
-
-              <ProgressBar
-                  android:id="@+id/progress"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  app:layout_constraintTop_toTopOf="@id/recycler"
-                  app:layout_constraintBottom_toBottomOf="@id/recycler"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-
-              <TextView
-                  android:id="@+id/error"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:textColor="@color/text_dim"
-                  android:visibility="gone"
-                  app:layout_constraintTop_toTopOf="@id/recycler"
-                  app:layout_constraintBottom_toBottomOf="@id/recycler"
-                  app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
-          </androidx.constraintlayout.widget.ConstraintLayout>
-          EOF
-
-          # 6. MainActivity.kt
-          cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
-          package com.tvplayer.app
-          import android.content.Intent
-          import android.os.Bundle
-          import android.view.View
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.lifecycle.lifecycleScope
-          import androidx.recyclerview.widget.LinearLayoutManager
-          import com.tvplayer.app.databinding.ActivityMainBinding
-          import kotlinx.coroutines.launch
-          import org.json.JSONObject
-
-          class MainActivity : AppCompatActivity() {
-              private lateinit var b: ActivityMainBinding
-              override fun onCreate(s: Bundle?) {
-                  super.onCreate(s)
-                  b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
-                  b.recycler.layoutManager = LinearLayoutManager(this)
-                  b.btnRefresh.setOnClickListener { load() }
-                  b.btnExit.setOnClickListener { exitApp() }
-                  load()
-              }
-
-              private fun exitApp() {
-                  finishAndRemoveTask()
-                  android.os.Process.killProcess(android.os.Process.myPid())
-              }
-
-              private fun load() {
-                  b.progress.visibility = View.VISIBLE
-                  b.error.visibility = View.GONE
-                  b.recycler.visibility = View.GONE
-                  lifecycleScope.launch {
-                      val (manual, cat) = readConfig()
-                      val list = loadChannels(cat, manual)
-                      b.progress.visibility = View.GONE
-                      if (list.isEmpty()) {
-                          b.error.text = getString(R.string.error_load)
-                          b.error.visibility = View.VISIBLE; return@launch
-                      }
-                      b.recycler.visibility = View.VISIBLE
-                      b.recycler.adapter = ChannelAdapter(list) { ch ->
-                          startActivity(Intent(this@MainActivity, PlayerActivity::class.java)
-                              .putExtra("url", ch.url).putExtra("name", ch.name))
-                      }
-                      b.recycler.post {
-                          b.recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
-                      }
-                  }
-              }
-
-              private fun readConfig(): Pair<List<Channel>, String> {
-                  val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
-                  val o = JSONObject(json); val manual = mutableListOf<Channel>()
-                  o.optJSONArray("channels")?.let { arr ->
-                      for (i in 0 until arr.length()) {
-                          val c = arr.getJSONObject(i)
-                          manual.add(Channel(c.optString("name"), c.optString("url"),
-                              c.optString("logo"), c.optString("group", "VK Video")))
-                      }
-                  }
-                  val cats = o.optJSONArray("categories")
-                  return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
-              }
-          }
-          EOF
-
-          # 7. ChannelAdapter.kt
-          cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
-          package com.tvplayer.app
-          import android.view.*
-          import android.widget.ImageView
-          import android.widget.TextView
-          import androidx.recyclerview.widget.RecyclerView
-          import coil.load
-
-          class ChannelAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit)
-              : RecyclerView.Adapter<ChannelAdapter.VH>() {
-
-              class VH(v: View) : RecyclerView.ViewHolder(v) {
-                  val logo: ImageView = v.findViewById(R.id.logo)
-                  val name: TextView = v.findViewById(R.id.name)
-              }
-
-              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH =
-                  VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
-
-              override fun onBindViewHolder(h: VH, pos: Int) {
-                  val ch = items[pos]
-                  h.name.text = ch.name
-                  if (ch.logo.isNotBlank()) {
-                      h.logo.load(ch.logo) {
-                          crossfade(true)
-                          placeholder(android.R.color.darker_gray)
-                          error(android.R.color.darker_gray)
-                      }
-                  } else {
-                      h.logo.setImageResource(android.R.color.darker_gray)
-                  }
-                  h.itemView.setOnClickListener { onClick(ch) }
-              }
-              override fun getItemCount() = items.size
-          }
-          EOF
-
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: removed invalid xml attribute, player ui and quality ready" || echo "no changes"
+          git commit -m "feat: sleep timer (5m-5h), pure live UI" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
