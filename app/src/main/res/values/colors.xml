@@ -1,7 +1,0 @@
-<resources>
-    <color name="bg">#FF0E1116</color>
-    <color name="tile_bg">#FF1A1F27</color>
-    <color name="tile_focus">#FF3B82F6</color>
-    <color name="text">#FFFFFFFF</color>
-    <color name="text_dim">#FFB0B6C0</color>
-</resources>
