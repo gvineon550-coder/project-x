@@ -70,7 +70,10 @@ class PlayerActivity : AppCompatActivity() {
     }
     private fun startPlayback() {
         getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
-        b.channelNameOverlay.text = names.getOrNull(currentIndex) ?: "Канал"
+        // В оверлее показываем номер канала и его название
+        val chNum = currentIndex + 1
+        val chName = names.getOrNull(currentIndex) ?: "Канал"
+        b.channelNameOverlay.text = "$chNum. $chName"
         b.channelNameOverlay.visibility = View.VISIBLE
         handler.removeCallbacks(hideChannelOverlayRunnable)
         handler.postDelayed(hideChannelOverlayRunnable, 3000)

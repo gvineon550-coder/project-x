@@ -10,6 +10,17 @@
     android:clickable="true"
     android:layout_marginBottom="4dp"
     android:gravity="center_vertical">
+
+    <!-- Номер канала -->
+    <TextView
+        android:id="@+id/txtNumber"
+        android:layout_width="40dp"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textColor="@color/text_dim"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
     <ImageView
         android:id="@+id/logo"
         android:layout_width="80dp"

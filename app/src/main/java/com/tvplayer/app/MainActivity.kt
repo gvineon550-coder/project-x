@@ -27,7 +27,13 @@ class MainActivity : AppCompatActivity() {
         b.progress.visibility = View.VISIBLE; b.error.visibility = View.GONE; b.recycler.visibility = View.GONE
         lifecycleScope.launch {
             val (manual, cat) = readConfig()
-            allChannels = loadChannels(cat, manual)
+            val manualWithLogos = manual.map { ch ->
+                if (ch.logo.isBlank()) {
+                    val thumb = StreamResolver.getThumbnail(ch.url)
+                    if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                } else ch
+            }
+            allChannels = loadChannels(cat, manualWithLogos)
             b.progress.visibility = View.GONE
             if (allChannels.isEmpty()) { b.error.text = getString(R.string.error_load); b.error.visibility = View.VISIBLE; return@launch }
             updateView()
@@ -38,7 +44,8 @@ class MainActivity : AppCompatActivity() {
         allChannels.forEach { it.isFavorite = favs.contains(it.url) }
         val sorted = allChannels.sortedByDescending { it.isFavorite }
         val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
-        b.txtTitle.text = if (showOnlyFavorites) "Избранное" else "Все каналы"
+        // Выводим количество каналов в заголовке
+        b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
         b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
         b.recycler.visibility = View.VISIBLE
         b.recycler.adapter = ChannelAdapter(displayed, { ch ->
