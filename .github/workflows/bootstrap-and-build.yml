@@ -36,10 +36,25 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 1: XML и Манифест (Верстка)
+      # ШАГ 1: Манифест, build.gradle (buildConfig), XML
       # ═══════════════════════════════════════════════════
-      - name: "📦 Генерация XML (Манифест и верстка)"
+      - name: "📦 Генерация манифеста и верстки"
         run: |
+          # Включаем buildConfig и добавляем repo в BuildConfig
+          python3 - << 'PYEOF'
+          import re
+          path = "app/build.gradle"
+          with open(path) as f: txt = f.read()
+          if "buildConfig = true" not in txt:
+              txt = txt.replace("viewBinding = true", "viewBinding = true\n        buildConfig = true")
+          if "GITHUB_REPO" not in txt:
+              txt = txt.replace(
+                  'versionName = "1.0"',
+                  'versionName = "1.0"\n        buildConfigField "String", "GITHUB_REPO", "\\"${System.getenv(\'GITHUB_REPOSITORY\') ?: \'user/tvplayer\'}\\""'
+              )
+          with open(path, "w") as f: f.write(txt)
+          PYEOF
+
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -48,6 +63,7 @@ jobs:
               <uses-permission android:name="android.permission.WAKE_LOCK" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
               <uses-feature android:name="android.software.leanback" android:required="false" />
               <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
               <application
@@ -70,8 +86,24 @@ jobs:
                       android:screenOrientation="sensorLandscape" />
                   <service android:name=".PlaybackService" android:exported="false"
                       android:foregroundServiceType="mediaPlayback" />
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
               </application>
           </manifest>
+          EOF
+
+          cat > app/src/main/res/xml/file_paths.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <cache-path name="cache" path="." />
+          </paths>
           EOF
 
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
@@ -120,9 +152,8 @@ jobs:
                   android:layout_height="48dp"
                   android:padding="8dp"
                   android:src="@android:drawable/btn_star_big_off"
-                  android:clickable="true"
-                  android:focusable="true"
-                  android:background="?attr/selectableItemBackgroundBorderless" />
+                  android:focusable="false"
+                  android:clickable="false" />
           </LinearLayout>
           EOF
 
@@ -183,22 +214,9 @@ jobs:
                   android:padding="8dp"
                   android:clipToPadding="false"
                   app:layout_constraintTop_toBottomOf="@id/topBar"
-                  app:layout_constraintBottom_toTopOf="@id/btnExit"
+                  app:layout_constraintBottom_toBottomOf="parent"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
-              <TextView
-                  android:id="@+id/btnExit"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Выход (или BACK)"
-                  android:textColor="@color/text_dim"
-                  android:textSize="16sp"
-                  android:gravity="center"
-                  android:padding="20dp"
-                  android:focusable="true"
-                  android:clickable="true"
-                  android:background="?attr/selectableItemBackground"
-                  app:layout_constraintBottom_toBottomOf="parent" />
               <ProgressBar
                   android:id="@+id/progress"
                   android:layout_width="wrap_content"
@@ -238,6 +256,28 @@ jobs:
                   android:id="@+id/touchArea"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent" />
+              <LinearLayout
+                  android:id="@+id/channelListPanel"
+                  android:layout_width="320dp"
+                  android:layout_height="match_parent"
+                  android:layout_gravity="start"
+                  android:background="#EE111111"
+                  android:visibility="gone"
+                  android:orientation="vertical"
+                  android:elevation="8dp">
+                  <TextView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Выбор канала"
+                      android:textColor="#FFFFFF"
+                      android:textSize="20sp"
+                      android:textStyle="bold"
+                      android:padding="16dp" />
+                  <androidx.recyclerview.widget.RecyclerView
+                      android:id="@+id/channelListRecycler"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent" />
+              </LinearLayout>
               <TextView
                   android:id="@+id/channelNameOverlay"
                   android:layout_width="wrap_content"
@@ -283,7 +323,7 @@ jobs:
                       android:background="#AA000000"
                       android:paddingHorizontal="16dp"
                       android:paddingVertical="8dp"
-                      android:text="← Назад"
+                      android:text="← В список"
                       android:textColor="#FFFFFF"
                       android:textSize="16sp"
                       android:textStyle="bold"
@@ -320,22 +360,42 @@ jobs:
                   android:clickable="true"
                   android:focusable="true"
                   android:visibility="gone" />
-              <TextView
-                  android:id="@+id/btnQuality"
+              <LinearLayout
+                  android:id="@+id/rightControls"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="top|end"
                   android:layout_margin="24dp"
-                  android:background="#AA000000"
-                  android:paddingHorizontal="16dp"
-                  android:paddingVertical="8dp"
-                  android:text="Auto"
-                  android:textColor="#FFFFFF"
-                  android:textSize="16sp"
-                  android:textStyle="bold"
-                  android:clickable="true"
-                  android:focusable="true"
-                  android:visibility="gone" />
+                  android:orientation="vertical"
+                  android:visibility="gone">
+                  <TextView
+                      android:id="@+id/btnQuality"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:background="#AA000000"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="Auto"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+                  <TextView
+                      android:id="@+id/btnAspect"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="8dp"
+                      android:background="#AA000000"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="Заполнить"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
               <ProgressBar
                   android:id="@+id/progress"
                   android:layout_width="wrap_content"
@@ -376,26 +436,38 @@ jobs:
           </FrameLayout>
           EOF
 
+          cat > app/src/main/res/layout/item_panel_channel.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <TextView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/panelChannelName"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:padding="16dp"
+              android:textColor="#FFFFFF"
+              android:textSize="18sp"
+              android:focusable="true"
+              android:focusableInTouchMode="true"
+              android:clickable="true"
+              android:background="?attr/selectableItemBackground" />
+          EOF
+
       # ═══════════════════════════════════════════════════
-      # ШАГ 2: Python (Таймауты)
+      # ШАГ 2: Python
       # ═══════════════════════════════════════════════════
-      - name: "🐍 Обновление Python (Таймауты 15 сек)"
+      - name: "🐍 Python"
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
           import yt_dlp
           import urllib.request
           import re
           import socket
-
           socket.setdefaulttimeout(15)
-
           HEADERS = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
               "Referer": "https://vk.com/",
               "Origin":  "https://vk.com",
           }
-
           def resolve(url):
               try:
                   opts = {"quiet": True, "no_warnings": True, "skip_download": True,
@@ -419,7 +491,6 @@ jobs:
                   return info.get("url") or "ERROR: no m3u8 found"
               except Exception as e:
                   return "ERROR: " + str(e)
-
           def get_thumbnail(url):
               try:
                   req = urllib.request.Request(url, headers=HEADERS)
@@ -440,9 +511,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin (Список, Кэш, Модели, Проверка сети)
+      # ШАГ 3: Kotlin Core (API, Cache, Adapters)
       # ═══════════════════════════════════════════════════
-      - name: "🧠 Генерация Kotlin (Проверка сети + Кэш)"
+      - name: "🧠 Kotlin Core"
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
           package com.tvplayer.app
@@ -491,7 +562,6 @@ jobs:
           import android.content.Context
           import android.net.ConnectivityManager
           import android.net.NetworkCapabilities
-
           object NetworkUtils {
               fun isOnline(context: Context): Boolean {
                   val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -529,7 +599,7 @@ jobs:
           import android.content.Context
           object StreamCache {
               private const val PREFS = "stream_cache"
-              private const val TTL_MS = 60 * 60 * 1000L // 1 час
+              private const val TTL_MS = 60 * 60 * 1000L
               fun get(context: Context, channelUrl: String): String? {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val entry = prefs.getString(channelUrl, null) ?: return null
@@ -551,6 +621,10 @@ jobs:
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   prefs.edit().remove(channelUrl).apply()
               }
+              fun clearAll(context: Context) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  prefs.edit().clear().apply()
+              }
           }
           EOF
 
@@ -561,7 +635,11 @@ jobs:
           import android.widget.TextView
           import androidx.recyclerview.widget.RecyclerView
           import coil.load
-          class ChannelAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit, private val onFavoriteClick: (Channel) -> Unit) : RecyclerView.Adapter<ChannelAdapter.VH>() {
+          class ChannelAdapter(
+              private val items: List<Channel>,
+              private val onClick: (Channel) -> Unit,
+              private val onLongClick: (Channel) -> Unit
+          ) : RecyclerView.Adapter<ChannelAdapter.VH>() {
               class VH(v: View) : RecyclerView.ViewHolder(v) {
                   val txtNumber: TextView = v.findViewById(R.id.txtNumber)
                   val logo: ImageView = v.findViewById(R.id.logo)
@@ -574,31 +652,113 @@ jobs:
                   h.txtNumber.text = (pos + 1).toString()
                   h.name.text = ch.name
                   if (ch.logo.isNotBlank()) {
-                      h.logo.load(ch.logo) { 
-                          crossfade(true)
-                          size(160, 160)
-                          placeholder(android.R.color.darker_gray)
-                          error(android.R.color.darker_gray)
-                      }
+                      h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
                   } else {
-                      h.logo.load(null)
-                      h.logo.setImageDrawable(null)
+                      h.logo.load(null); h.logo.setImageDrawable(null)
                   }
                   if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
+                  if (pos == 0) h.itemView.nextFocusUpId = R.id.btnFavFilter
                   h.itemView.setOnClickListener { onClick(ch) }
-                  h.btnFav.setOnClickListener { onFavoriteClick(ch) }
+                  h.itemView.setOnLongClickListener { onLongClick(ch); true }
               }
               override fun getItemCount() = items.size
           }
           EOF
 
+          cat > app/src/main/java/com/tvplayer/app/ChannelListAdapter.kt << 'EOF'
+          package com.tvplayer.app
+          import android.view.*
+          import android.widget.TextView
+          import androidx.recyclerview.widget.RecyclerView
+          class ChannelListAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit) : RecyclerView.Adapter<ChannelListAdapter.VH>() {
+              class VH(v: View) : RecyclerView.ViewHolder(v) { val name: TextView = v.findViewById(R.id.panelChannelName) }
+              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH = VH(LayoutInflater.from(p.context).inflate(R.layout.item_panel_channel, p, false))
+              override fun onBindViewHolder(h: VH, pos: Int) {
+                  val ch = items[pos]
+                  h.name.text = "${pos + 1}. ${ch.name}"
+                  h.itemView.setOnClickListener { onClick(ch) }
+              }
+              override fun getItemCount() = items.size
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/UpdateChecker.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.concurrent.TimeUnit
+
+          object UpdateChecker {
+              data class UpdateInfo(val downloadUrl: String, val versionCode: Int, val changelog: String)
+
+              suspend fun checkForUpdate(context: Context): UpdateInfo? = withContext(Dispatchers.IO) {
+                  try {
+                      val repo = BuildConfig.GITHUB_REPO
+                      if (repo.isBlank() || repo.contains("user/")) return@withContext null
+                      val url = "https://api.github.com/repos/$repo/releases/latest"
+                      val client = OkHttpClient.Builder()
+                          .connectTimeout(10, TimeUnit.SECONDS)
+                          .readTimeout(15, TimeUnit.SECONDS).build()
+                      val req = Request.Builder().url(url)
+                          .header("Accept", "application/vnd.github+json")
+                          .header("User-Agent", "TVPlayer").build()
+                      client.newCall(req).execute().use { resp ->
+                          if (!resp.isSuccessful) return@withContext null
+                          val body = resp.body?.string() ?: return@withContext null
+                          val json = JSONObject(body)
+                          val tag = json.optString("tag_name").removePrefix("v")
+                          val newVersion = tag.toIntOrNull() ?: 0
+                          if (newVersion <= BuildConfig.VERSION_CODE) return@withContext null
+                          val assets = json.optJSONArray("assets") ?: return@withContext null
+                          if (assets.length() == 0) return@withContext null
+                          val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
+                          if (apkUrl.isBlank()) return@withContext null
+                          UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия приложения"))
+                      }
+                  } catch (e: Exception) { null }
+              }
+
+              suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
+                  try {
+                      val client = OkHttpClient.Builder()
+                          .connectTimeout(30, TimeUnit.SECONDS)
+                          .readTimeout(120, TimeUnit.SECONDS).build()
+                      val req = Request.Builder().url(url).build()
+                      client.newCall(req).execute().use { resp ->
+                          if (!resp.isSuccessful) return@withContext null
+                          val file = File(context.cacheDir, "update.apk")
+                          resp.body?.byteStream()?.use { input ->
+                              file.outputStream().use { output -> input.copyTo(output) }
+                          }
+                          file
+                      }
+                  } catch (e: Exception) { null }
+              }
+          }
+          EOF
+
+      # ═══════════════════════════════════════════════════
+      # ШАГ 4: MainActivity
+      # ═══════════════════════════════════════════════════
+      - name: "🧠 MainActivity (с OTA)"
+        run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
+          import android.app.AlertDialog
           import android.content.Intent
+          import android.net.Uri
           import android.os.Bundle
+          import android.provider.Settings
           import android.view.View
+          import android.widget.Toast
           import androidx.activity.OnBackPressedCallback
           import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.FileProvider
           import androidx.lifecycle.lifecycleScope
           import androidx.recyclerview.widget.LinearLayoutManager
           import coil.ImageLoader
@@ -607,6 +767,7 @@ jobs:
           import com.tvplayer.app.databinding.ActivityMainBinding
           import kotlinx.coroutines.launch
           import org.json.JSONObject
+          import java.io.File
 
           class MainActivity : AppCompatActivity(), ImageLoaderFactory {
               private lateinit var b: ActivityMainBinding
@@ -616,12 +777,7 @@ jobs:
 
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
-                      .diskCache {
-                          DiskCache.Builder()
-                              .directory(cacheDir.resolve("image_cache"))
-                              .maxSizeBytes(15L * 1024L * 1024L)
-                              .build()
-                      }
+                      .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
                       .build()
               }
 
@@ -629,31 +785,91 @@ jobs:
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
+                  autoCleanCache()
                   b.btnRefresh.setOnClickListener { load() }
-                  b.btnExit.setOnClickListener { exitApp() }
+                  b.btnRefresh.setOnLongClickListener { clearAppCacheManually(); true }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+                  b.btnFavFilter.nextFocusDownId = R.id.recycler
+                  b.btnRefresh.nextFocusDownId = R.id.recycler
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() { exitApp() }
                   })
+                  load()
+                  checkForUpdates()
+              }
+
+              private fun autoCleanCache() {
+                  var totalSize = 0L
+                  cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
+                  if (totalSize > 15 * 1024 * 1024) {
+                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                  }
+              }
+
+              private fun clearAppCacheManually() {
+                  val imageLoader = coil.Coil.imageLoader(this)
+                  imageLoader.diskCache?.clear()
+                  imageLoader.memoryCache?.clear()
+                  StreamCache.clearAll(this)
+                  cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                  Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
                   load()
               }
 
               private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
 
-              private fun load() {
-                  // ПРОВЕРКА ИНТЕРНЕТА ПЕРЕД ОБРАЩЕНИЕМ К VK
-                  if (!NetworkUtils.isOnline(this)) {
-                      b.progress.visibility = View.GONE
-                      b.recycler.visibility = View.GONE
-                      b.error.text = "Нет подключения к интернету.\nПроверьте Wi-Fi или кабель и нажмите «Обновить»."
-                      b.error.visibility = View.VISIBLE
+              private fun checkForUpdates() {
+                  lifecycleScope.launch {
+                      val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
+                      AlertDialog.Builder(this@MainActivity)
+                          .setTitle("Доступно обновление v${info.versionCode}")
+                          .setMessage(info.changelog.take(400))
+                          .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
+                          .setNegativeButton("Позже", null)
+                          .show()
+                  }
+              }
+
+              private fun startUpdateDownload(url: String) {
+                  Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
+                  lifecycleScope.launch {
+                      val file = UpdateChecker.downloadApk(this@MainActivity, url)
+                      if (file == null) {
+                          Toast.makeText(this@MainActivity, "Не удалось скачать обновление", Toast.LENGTH_LONG).show()
+                          return@launch
+                      }
+                      installApk(file)
+                  }
+              }
+
+              private fun installApk(file: File) {
+                  if (!packageManager.canRequestPackageInstalls()) {
+                      Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
+                      try {
+                          val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+                          startActivity(intent)
+                      } catch (_: Exception) {}
                       return
                   }
+                  try {
+                      val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      val intent = Intent(Intent.ACTION_VIEW).apply {
+                          setDataAndType(uri, "application/vnd.android.package-archive")
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                      }
+                      startActivity(intent)
+                  } catch (e: Exception) {
+                      Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
+                  }
+              }
 
-                  b.progress.visibility = View.VISIBLE
-                  b.error.visibility = View.GONE
-                  b.recycler.visibility = View.GONE
-
+              private fun load() {
+                  if (!NetworkUtils.isOnline(this)) {
+                      b.progress.visibility = View.GONE; b.recycler.visibility = View.GONE
+                      b.error.text = "Нет подключения к интернету."
+                      b.error.visibility = View.VISIBLE; return
+                  }
+                  b.progress.visibility = View.VISIBLE; b.error.visibility = View.GONE; b.recycler.visibility = View.GONE
                   lifecycleScope.launch {
                       val (manual, cat) = readConfig()
                       val manualWithLogos = manual.map { ch ->
@@ -665,9 +881,8 @@ jobs:
                       allChannels = loadChannels(cat, manualWithLogos)
                       b.progress.visibility = View.GONE
                       if (allChannels.isEmpty()) {
-                          b.error.text = "Не удалось загрузить список каналов."
-                          b.error.visibility = View.VISIBLE
-                          return@launch
+                          b.error.text = "Не удалось загрузить список."
+                          b.error.visibility = View.VISIBLE; return@launch
                       }
                       updateView()
                   }
@@ -693,7 +908,7 @@ jobs:
                       prefs.edit().putStringSet("favorites", currentFavs).apply()
                       updateView()
                   })
-                  b.recycler.post { b.recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() }
+                  b.recycler.post { b.recycler.getChildAt(0)?.requestFocus() }
               }
 
               private fun readConfig(): Pair<List<Channel>, String> {
@@ -707,9 +922,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 4: Kotlin (Плеер) и Сборка
+      # ШАГ 5: PlayerActivity (с форматом экрана) + Сборка
       # ═══════════════════════════════════════════════════
-      - name: "🎬 Плеер и сборка"
+      - name: "🎬 Плеер + сборка"
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
@@ -737,8 +952,11 @@ jobs:
           import androidx.media3.exoplayer.ExoPlayer
           import androidx.media3.exoplayer.hls.HlsMediaSource
           import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+          import androidx.media3.ui.AspectRatioFrameLayout
+          import androidx.recyclerview.widget.LinearLayoutManager
           import com.tvplayer.app.databinding.ActivityPlayerBinding
           import kotlinx.coroutines.launch
+
           class PlayerActivity : AppCompatActivity() {
               private lateinit var b: ActivityPlayerBinding
               private var player: ExoPlayer? = null
@@ -750,14 +968,16 @@ jobs:
               private var retryCount = 0
               private val MAX_RETRIES = 5
               private val RETRY_DELAY = 2000L
+              private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
               private val handler = Handler(Looper.getMainLooper())
               private val hideControlsRunnable = Runnable {
                   b.controlsOverlay.visibility = View.GONE
-                  b.btnQuality.visibility = View.GONE
+                  b.rightControls.visibility = View.GONE
                   b.btnSleepTimer.visibility = View.GONE
                   b.leftControls.visibility = View.GONE
               }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
                   b = ActivityPlayerBinding.inflate(layoutInflater); setContentView(b.root)
@@ -772,26 +992,62 @@ jobs:
                   b.btnBack.setOnClickListener { finish() }
                   b.btnExitApp.setOnClickListener { exitApp() }
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+                  b.btnAspect.setOnClickListener { toggleAspect(); showControls() }
               }
+
+              private fun toggleAspect() {
+                  currentResizeMode = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+                      AspectRatioFrameLayout.RESIZE_MODE_FIT
+                  } else {
+                      AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                  }
+                  b.playerView.resizeMode = currentResizeMode
+                  b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
+              }
+
               private fun exitApp() {
                   handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
                   finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid())
               }
+
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                  if (b.channelListPanel.visibility == View.VISIBLE) {
+                      if (event.keyCode == KeyEvent.KEYCODE_BACK) { b.channelListPanel.visibility = View.GONE; return true }
+                      return super.dispatchKeyEvent(event)
+                  }
                   if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
                   if (event.action == KeyEvent.ACTION_DOWN) {
                       when (event.keyCode) {
                           KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_RIGHT -> { switchChannel(-1); return true }
                           KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_LEFT -> { switchChannel(1); return true }
-                          KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { showControls(); return true }
+                          KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { showChannelList(); return true }
                       }
                   }
                   return super.dispatchKeyEvent(event)
               }
+
+              private fun showChannelList() {
+                  val channels = names.mapIndexed { i, n -> Channel(n, urls.getOrNull(i) ?: "", "") }
+                  b.channelListPanel.visibility = View.VISIBLE
+                  b.controlsOverlay.visibility = View.GONE
+                  b.rightControls.visibility = View.GONE
+                  b.btnSleepTimer.visibility = View.GONE
+                  b.leftControls.visibility = View.GONE
+                  b.channelListRecycler.layoutManager = LinearLayoutManager(this)
+                  b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
+                      val idx = urls.indexOf(ch.url)
+                      if (idx >= 0) { currentIndex = idx; startPlayback() }
+                      b.channelListPanel.visibility = View.GONE
+                  }
+                  b.channelListRecycler.scrollToPosition(currentIndex)
+                  b.channelListRecycler.post { b.channelListRecycler.findViewHolderForAdapterPosition(currentIndex)?.itemView?.requestFocus() }
+              }
+
               private fun switchChannel(direction: Int) {
                   val newIndex = currentIndex + direction
                   if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() }
               }
+
               private fun startPlayback() {
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
                   val chNum = currentIndex + 1
@@ -804,15 +1060,11 @@ jobs:
                   retryCount = 0
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
-                  if (cached != null) {
-                      play(cached)
-                      return
-                  }
+                  if (cached != null) { play(cached); return }
                   if (!NetworkUtils.isOnline(this)) {
                       b.progress.visibility = View.GONE
-                      b.errorText.text = "Нет подключения к интернету.\nПроверьте Wi-Fi или кабель."
-                      b.errorLayout.visibility = View.VISIBLE
-                      return
+                      b.errorText.text = "Нет подключения к интернету."
+                      b.errorLayout.visibility = View.VISIBLE; return
                   }
                   b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
@@ -822,6 +1074,7 @@ jobs:
                       play(direct)
                   }
               }
+
               private fun play(m3u8: String) {
                   player?.release()
                   val http = DefaultHttpDataSource.Factory()
@@ -853,6 +1106,7 @@ jobs:
                   }
                   b.touchArea.setOnClickListener { if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls() }
               }
+
               private fun updateQualityButton(tracks: Tracks) {
                   val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
                   val selectedIndex = (0 until videoGroup.length).firstOrNull { videoGroup.isTrackSelected(it) } ?: return
@@ -861,6 +1115,7 @@ jobs:
                   val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
                   b.btnQuality.text = height + bitrate
               }
+
               private fun showQualityDialog() {
                   val p = player ?: return
                   val tracks = p.currentTracks
@@ -880,6 +1135,7 @@ jobs:
                       else trackSelector.parameters = trackSelector.buildUponParameters().setOverrideForType(TrackSelectionOverride(videoGroup.getMediaTrackGroup(), which - 1)).build()
                   }.show()
               }
+
               private fun handleError() {
                   if (retryCount < MAX_RETRIES) {
                       retryCount++; b.progress.visibility = View.VISIBLE; handler.postDelayed({ startPlayback() }, RETRY_DELAY)
@@ -887,14 +1143,16 @@ jobs:
                       b.progress.visibility = View.GONE
                       b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
                       b.errorLayout.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE
-                      b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
+                      b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
                   }
               }
+
               private fun showSleepTimerDialog() {
                   val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
                   val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
                   AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which -> val mins = minutes[which]; if (mins == 0) cancelSleepTimer() else startSleepTimer(mins) }.show()
               }
+
               private fun startSleepTimer(minutes: Int) {
                   sleepTimer?.cancel()
                   val millis = minutes * 60 * 1000L
@@ -907,14 +1165,17 @@ jobs:
                   }.start()
                   showControls()
               }
+
               private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
+
               private fun showControls() {
                   b.controlsOverlay.visibility = View.VISIBLE
-                  b.btnQuality.visibility = View.VISIBLE
+                  b.rightControls.visibility = View.VISIBLE
                   b.btnSleepTimer.visibility = View.VISIBLE
                   b.leftControls.visibility = View.VISIBLE
                   handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 4000)
               }
+
               override fun onDestroy() {
                   super.onDestroy(); handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
               }
@@ -926,7 +1187,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: no-internet check in main screen before VK API call" || echo "no changes"
+          git commit -m "feat: OTA updates + aspect ratio toggle" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -945,9 +1206,9 @@ jobs:
         id: apk
         run: |
           SRC=$(find app/build/outputs/apk/release -name "*.apk" -type f | head -1)
-          V=$(grep 'versionName' app/build.gradle | head -1 | awk -F'"' '{print $2}')
-          TAG="v${V}-$(date +%Y%m%d-%H%M)"
-          FILE="TVPlayer_${TAG}.apk"
+          RUN_NUMBER="${{ github.run_number }}"
+          TAG="v${RUN_NUMBER}"
+          FILE="TVPlayer_v${RUN_NUMBER}.apk"
           cp "$SRC" "$FILE"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "file=$FILE" >> $GITHUB_OUTPUT
@@ -956,6 +1217,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
-          name: TV Player ${{ steps.apk.outputs.tag }}
+          name: TV Player v${{ github.run_number }}
+          body: |
+            ## Обновление #${{ github.run_number }}
+
+            Что нового в этой версии — в описании выше (в истории коммитов).
+
+            📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
