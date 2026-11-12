@@ -35,143 +35,253 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      # ═══ Патчи (применяются и коммитятся один раз) ═══
-      - name: Patch files
+      # ═══════════════════════════════════════════════════
+      # ПАТЧИ: Убираем "Программа отсутствует"
+      # ═══════════════════════════════════════════════════
+      - name: "🎨 Очистка интерфейса каналов"
         run: |
-          # 1) Снимаем фиксацию версии yt-dlp — ставим самую свежую
-          sed -i 's/install("yt-dlp==[^"]*")/install("yt-dlp")/' app/build.gradle
-          sed -i 's/yt-dlp==[0-9.]*/yt-dlp/' app/src/main/assets/requirements.txt 2>/dev/null || true
+          # 1. Карточка канала без лишнего текста
+          cat > app/src/main/res/layout/item_channel.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="horizontal"
+              android:padding="12dp"
+              android:focusable="true"
+              android:focusableInTouchMode="true"
+              android:background="@drawable/tile_selector"
+              android:clickable="true"
+              android:layout_marginBottom="4dp">
 
-          # 2) Подробный resolver.py: пробует несколько форматов, возвращает полную ошибку
-          cat > app/src/main/python/resolver.py << 'PYEOF'
-          import yt_dlp
+              <!-- Квадратный логотип -->
+              <ImageView
+                  android:id="@+id/logo"
+                  android:layout_width="80dp"
+                  android:layout_height="80dp"
+                  android:scaleType="centerCrop"
+                  android:background="#222222" />
 
-          HEADERS = {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-              "Referer": "https://vk.com/",
-              "Origin":  "https://vk.com",
-          }
+              <!-- Только название, выровненное по центру -->
+              <TextView
+                  android:id="@+id/name"
+                  android:layout_width="0dp"
+                  android:layout_height="80dp"
+                  android:layout_weight="1"
+                  android:paddingStart="16dp"
+                  android:paddingEnd="8dp"
+                  android:gravity="center_vertical"
+                  android:textColor="@color/text"
+                  android:textSize="18sp"
+                  android:textStyle="bold"
+                  android:maxLines="1"
+                  android:ellipsize="end" />
+          </LinearLayout>
+          EOF
 
-          def resolve(url):
-              errors = []
-              for fmt in ["best[protocol^=m3u8]/best", "best", "all"]:
-                  try:
-                      opts = {
-                          "quiet": True, "no_warnings": True, "skip_download": True,
-                          "format": fmt, "http_headers": HEADERS,
-                      }
-                      with yt_dlp.YoutubeDL(opts) as ydl:
-                          info = ydl.extract_info(url, download=False)
-                      for f in info.get("formats", []):
-                          proto = f.get("protocol", "") or ""
-                          if proto.startswith("m3u8") and f.get("url"):
-                              return f["url"]
-                      if info.get("url"):
-                          return info["url"]
-                      protocols = [f.get("protocol") for f in info.get("formats", [])]
-                      errors.append(f"{fmt}: url пустой, protocols={protocols}")
-                  except Exception as e:
-                      errors.append(f"{fmt}: {e}")
-              return "ERROR: " + " || ".join(errors)
-          PYEOF
+          # 2. Главный экран (остается без изменений, копируем для надежности)
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg">
 
-          # 3) StreamResolver: пропускает ошибку наружу
-          cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'KTEOF'
+              <!-- Верхняя панель -->
+              <LinearLayout
+                  android:id="@+id/topBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="64dp"
+                  android:orientation="horizontal"
+                  android:background="#1A1A1A"
+                  android:gravity="center_vertical"
+                  android:paddingHorizontal="16dp"
+                  app:layout_constraintTop_toTopOf="parent">
+
+                  <TextView
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Все каналы"
+                      android:textColor="@color/text"
+                      android:textSize="22sp"
+                      android:textStyle="bold" />
+
+                  <TextView
+                      android:id="@+id/btnRefresh"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Обновить"
+                      android:textColor="@color/text_dim"
+                      android:textSize="16sp"
+                      android:padding="12dp"
+                      android:background="?attr/selectableItemBackground" />
+              </LinearLayout>
+
+              <androidx.recyclerview.widget.RecyclerView
+                  android:id="@+id/recycler"
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:padding="8dp"
+                  android:clipToPadding="false"
+                  app:layout_constraintTop_toBottomOf="@id/topBar"
+                  app:layout_constraintBottom_toTopOf="@id/btnExit"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <TextView
+                  android:id="@+id/btnExit"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Выход"
+                  android:textColor="@color/text_dim"
+                  android:textSize="16sp"
+                  android:gravity="center"
+                  android:padding="20dp"
+                  android:background="?attr/selectableItemBackground"
+                  app:layout_constraintBottom_toBottomOf="parent" />
+
+              <ProgressBar
+                  android:id="@+id/progress"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  app:layout_constraintTop_toTopOf="@id/recycler"
+                  app:layout_constraintBottom_toBottomOf="@id/recycler"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+
+              <TextView
+                  android:id="@+id/error"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:textColor="@color/text_dim"
+                  android:visibility="gone"
+                  app:layout_constraintTop_toTopOf="@id/recycler"
+                  app:layout_constraintBottom_toBottomOf="@id/recycler"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          EOF
+
+          # 3. MainActivity (без изменений)
+          cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
-
-          import com.chaquo.python.Python
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
-
-          object StreamResolver {
-              suspend fun resolve(url: String): String = withContext(Dispatchers.IO) {
-                  try {
-                      val m = Python.getInstance().getModule("resolver")
-                      m.callAttr("resolve", url).toString()
-                  } catch (e: Exception) {
-                      "ERROR: " + (e.message ?: e.toString())
-                  }
-              }
-          }
-          KTEOF
-
-          # 4) PlayerActivity: показывает текст ошибки в UI
-          cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'KTEOF'
-          package com.tvplayer.app
-
+          import android.content.Intent
           import android.os.Bundle
           import android.view.View
           import androidx.appcompat.app.AppCompatActivity
           import androidx.lifecycle.lifecycleScope
-          import androidx.media3.common.MediaItem
-          import androidx.media3.datasource.DefaultHttpDataSource
-          import androidx.media3.exoplayer.ExoPlayer
-          import androidx.media3.exoplayer.hls.HlsMediaSource
-          import com.tvplayer.app.databinding.ActivityPlayerBinding
+          import androidx.recyclerview.widget.LinearLayoutManager
+          import com.tvplayer.app.databinding.ActivityMainBinding
           import kotlinx.coroutines.launch
+          import org.json.JSONObject
 
-          class PlayerActivity : AppCompatActivity() {
-              private lateinit var b: ActivityPlayerBinding
-              private var player: ExoPlayer? = null
-
+          class MainActivity : AppCompatActivity() {
+              private lateinit var b: ActivityMainBinding
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
-                  b = ActivityPlayerBinding.inflate(layoutInflater)
-                  setContentView(b.root)
-                  val url = intent.getStringExtra("url").orEmpty()
-                  b.progress.visibility = View.VISIBLE
-                  lifecycleScope.launch {
-                      val direct = StreamResolver.resolve(url)
-                      if (direct.startsWith("ERROR:")) {
-                          b.progress.visibility = View.GONE
-                          b.error.text = direct
-                          b.error.visibility = View.VISIBLE
-                          return@launch
-                      }
-                      play(direct)
-                  }
+                  b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
+                  b.recycler.layoutManager = LinearLayoutManager(this)
+                  b.btnRefresh.setOnClickListener { load() }
+                  b.btnExit.setOnClickListener { exitApp() }
+                  load()
               }
 
-              private fun play(m3u8: String) {
-                  val http = DefaultHttpDataSource.Factory()
-                      .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                      .setDefaultRequestProperties(mapOf(
-                          "Referer" to "https://vk.com/",
-                          "Origin" to "https://vk.com"))
-                  player = ExoPlayer.Builder(this).build().apply {
-                      setMediaSource(HlsMediaSource.Factory(http)
-                          .createMediaSource(MediaItem.fromUri(m3u8)))
-                      playWhenReady = true
-                      prepare()
-                  }
-                  b.playerView.player = player
-                  b.progress.visibility = View.GONE
-              }
-
-              override fun onDestroy() {
-                  super.onDestroy()
-                  player?.release()
-                  player = null
+              private fun exitApp() {
                   finishAndRemoveTask()
+                  android.os.Process.killProcess(android.os.Process.myPid())
+              }
+
+              private fun load() {
+                  b.progress.visibility = View.VISIBLE
+                  b.error.visibility = View.GONE
+                  b.recycler.visibility = View.GONE
+                  lifecycleScope.launch {
+                      val (manual, cat) = readConfig()
+                      val list = loadChannels(cat, manual)
+                      b.progress.visibility = View.GONE
+                      if (list.isEmpty()) {
+                          b.error.text = getString(R.string.error_load)
+                          b.error.visibility = View.VISIBLE; return@launch
+                      }
+                      b.recycler.visibility = View.VISIBLE
+                      b.recycler.adapter = ChannelAdapter(list) { ch ->
+                          startActivity(Intent(this@MainActivity, PlayerActivity::class.java)
+                              .putExtra("url", ch.url).putExtra("name", ch.name))
+                      }
+                      b.recycler.post {
+                          b.recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
+                      }
+                  }
+              }
+
+              private fun readConfig(): Pair<List<Channel>, String> {
+                  val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
+                  val o = JSONObject(json); val manual = mutableListOf<Channel>()
+                  o.optJSONArray("channels")?.let { arr ->
+                      for (i in 0 until arr.length()) {
+                          val c = arr.getJSONObject(i)
+                          manual.add(Channel(c.optString("name"), c.optString("url"),
+                              c.optString("logo"), c.optString("group", "VK Video")))
+                      }
+                  }
+                  val cats = o.optJSONArray("categories")
+                  return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
               }
           }
-          KTEOF
+          EOF
 
-          # Коммитим патчи, чтобы не применять каждый раз
+          # 4. ChannelAdapter: убираем ссылку на subtitle
+          cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
+          package com.tvplayer.app
+          import android.view.*
+          import android.widget.ImageView
+          import android.widget.TextView
+          import androidx.recyclerview.widget.RecyclerView
+          import coil.load
+
+          class ChannelAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit)
+              : RecyclerView.Adapter<ChannelAdapter.VH>() {
+
+              class VH(v: View) : RecyclerView.ViewHolder(v) {
+                  val logo: ImageView = v.findViewById(R.id.logo)
+                  val name: TextView = v.findViewById(R.id.name)
+              }
+
+              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH =
+                  VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
+
+              override fun onBindViewHolder(h: VH, pos: Int) {
+                  val ch = items[pos]
+                  h.name.text = ch.name
+                  
+                  if (ch.logo.isNotBlank()) {
+                      h.logo.load(ch.logo) {
+                          crossfade(true)
+                          placeholder(android.R.color.darker_gray)
+                          error(android.R.color.darker_gray)
+                      }
+                  } else {
+                      h.logo.setImageResource(android.R.color.darker_gray)
+                  }
+                  
+                  h.itemView.setOnClickListener { onClick(ch) }
+              }
+              override fun getItemCount() = items.size
+          }
+          EOF
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          if git diff --cached --quiet; then
-            echo "ℹ️ Патчи уже применены"
-          else
-            git commit -m "fix: update yt-dlp, add error reporting"
-            git push
-            echo "✅ Патчи применены и закоммичены"
-          fi
+          git commit -m "style: remove subtitle from channel list" || echo "no changes"
+          git push || echo "push failed"
 
-      # ═══ Сборка ═══
+      # ═══════════════════════════════════════════════════
+      # СБОРКА И РЕЛИЗ
+      # ═══════════════════════════════════════════════════
       - name: "🔨 Build APK"
         id: build
         run: |
@@ -183,12 +293,6 @@ jobs:
             echo "─── Что упало ───"
             grep -A 20 "What went wrong" /tmp/gradle_build.log | head -25
             tail -50 /tmp/gradle_build.log
-            {
-              echo "### ❌ Сборка упала"
-              echo '```'
-              grep -A 15 "What went wrong" /tmp/gradle_build.log | head -20
-              echo '```'
-            } >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
           echo "✅ Gradle OK"
@@ -203,7 +307,6 @@ jobs:
           cp "$SRC" "$FILE"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "file=$FILE" >> $GITHUB_OUTPUT
-          echo "✅ $FILE ($(du -h "$FILE" | cut -f1))"
 
       - name: "🚀 Release"
         uses: softprops/action-gh-release@v2
