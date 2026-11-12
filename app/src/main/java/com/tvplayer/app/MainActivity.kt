@@ -37,10 +37,11 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b.recycler.layoutManager = LinearLayoutManager(this)
         autoCleanCache()
         b.btnRefresh.setOnClickListener { load() }
-        b.btnRefresh.setOnLongClickListener { clearAppCacheManually(); true }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+        b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnFavFilter.nextFocusDownId = R.id.recycler
         b.btnRefresh.nextFocusDownId = R.id.recycler
+        b.btnSettings.nextFocusDownId = R.id.recycler
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { exitApp() }
         })
@@ -54,16 +55,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         if (totalSize > 15 * 1024 * 1024) {
             cacheDir.listFiles()?.forEach { it.deleteRecursively() }
         }
-    }
-
-    private fun clearAppCacheManually() {
-        val imageLoader = coil.Coil.imageLoader(this)
-        imageLoader.diskCache?.clear()
-        imageLoader.memoryCache?.clear()
-        StreamCache.clearAll(this)
-        cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-        Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
-        load()
     }
 
     private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
