@@ -9,7 +9,6 @@
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        app:controller_show_timeout_ms="2000"
         app:show_buffering="when_playing"
         app:use_controller="true"
         app:resize_mode="zoom"

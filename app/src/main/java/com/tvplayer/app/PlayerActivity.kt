@@ -30,7 +30,6 @@ class PlayerActivity : AppCompatActivity() {
         b = ActivityPlayerBinding.inflate(layoutInflater)
         setContentView(b.root)
         
-        // Включаем полноэкранный режим (скрываем системные панели)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -112,6 +111,5 @@ class PlayerActivity : AppCompatActivity() {
         super.onDestroy()
         player?.release()
         player = null
-        // ВАЖНО: здесь НЕТ killProcess, чтобы приложение не закрывалось при нажатии "Назад"
     }
 }
