@@ -37,7 +37,12 @@ class PlayerActivity : AppCompatActivity() {
     private val MAX_RETRIES = 5
     private val RETRY_DELAY = 2000L
     private val handler = Handler(Looper.getMainLooper())
-    private val hideControlsRunnable = Runnable { b.controlsOverlay.visibility = View.GONE; b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.btnBack.visibility = View.GONE }
+    private val hideControlsRunnable = Runnable {
+        b.controlsOverlay.visibility = View.GONE
+        b.btnQuality.visibility = View.GONE
+        b.btnSleepTimer.visibility = View.GONE
+        b.leftControls.visibility = View.GONE
+    }
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
@@ -51,7 +56,17 @@ class PlayerActivity : AppCompatActivity() {
         currentIndex = intent.getIntExtra("index", 0)
         startPlayback()
         b.btnBack.setOnClickListener { finish() }
+        b.btnExitApp.setOnClickListener { exitApp() }
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+    }
+    // Полное закрытие приложения
+    private fun exitApp() {
+        handler.removeCallbacksAndMessages(null)
+        sleepTimer?.cancel()
+        player?.release()
+        player = null
+        finishAndRemoveTask()
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
@@ -70,7 +85,6 @@ class PlayerActivity : AppCompatActivity() {
     }
     private fun startPlayback() {
         getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
-        // В оверлее показываем номер канала и его название
         val chNum = currentIndex + 1
         val chName = names.getOrNull(currentIndex) ?: "Канал"
         b.channelNameOverlay.text = "$chNum. $chName"
@@ -148,7 +162,7 @@ class PlayerActivity : AppCompatActivity() {
             b.progress.visibility = View.GONE
             b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
             b.errorLayout.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE
-            b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.btnBack.visibility = View.GONE
+            b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
         }
     }
     private fun showSleepTimerDialog() {
@@ -164,13 +178,16 @@ class PlayerActivity : AppCompatActivity() {
                 val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60
                 b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
             }
-            override fun onFinish() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
+            override fun onFinish() { exitApp() }
         }.start()
         showControls()
     }
     private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
     private fun showControls() {
-        b.controlsOverlay.visibility = View.VISIBLE; b.btnQuality.visibility = View.VISIBLE; b.btnSleepTimer.visibility = View.VISIBLE; b.btnBack.visibility = View.VISIBLE
+        b.controlsOverlay.visibility = View.VISIBLE
+        b.btnQuality.visibility = View.VISIBLE
+        b.btnSleepTimer.visibility = View.VISIBLE
+        b.leftControls.visibility = View.VISIBLE
         handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 4000)
     }
     override fun onDestroy() {

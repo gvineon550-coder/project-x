@@ -32,6 +32,8 @@
             android:textSize="16sp"
             android:textStyle="bold"
             android:padding="12dp"
+            android:focusable="true"
+            android:clickable="true"
             android:background="?attr/selectableItemBackground" />
         <TextView
             android:id="@+id/btnRefresh"
@@ -41,6 +43,8 @@
             android:textColor="@color/text_dim"
             android:textSize="16sp"
             android:padding="12dp"
+            android:focusable="true"
+            android:clickable="true"
             android:background="?attr/selectableItemBackground" />
     </LinearLayout>
     <androidx.recyclerview.widget.RecyclerView
@@ -57,11 +61,13 @@
         android:id="@+id/btnExit"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Выход"
+        android:text="Выход (или BACK)"
         android:textColor="@color/text_dim"
         android:textSize="16sp"
         android:gravity="center"
         android:padding="20dp"
+        android:focusable="true"
+        android:clickable="true"
         android:background="?attr/selectableItemBackground"
         app:layout_constraintBottom_toBottomOf="parent" />
     <ProgressBar

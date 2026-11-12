@@ -45,22 +45,43 @@
             android:clickable="true"
             android:focusable="true" />
     </LinearLayout>
-    <TextView
-        android:id="@+id/btnBack"
+    <!-- Группа кнопок: Назад + Выход -->
+    <LinearLayout
+        android:id="@+id/leftControls"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
         android:layout_margin="24dp"
-        android:background="#AA000000"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="8dp"
-        android:text="← Назад"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:clickable="true"
-        android:focusable="true"
-        android:visibility="gone" />
+        android:orientation="horizontal"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/btnBack"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#AA000000"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:text="← Назад"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true" />
+        <TextView
+            android:id="@+id/btnExitApp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="#AA000000"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:text="✕ Выход"
+            android:textColor="#FF8888"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
     <TextView
         android:id="@+id/btnSleepTimer"
         android:layout_width="wrap_content"

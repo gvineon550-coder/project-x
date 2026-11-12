@@ -14,7 +14,6 @@ class ChannelAdapter(private val items: List<Channel>, private val onClick: (Cha
     override fun onCreateViewHolder(p: ViewGroup, t: Int): VH = VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
     override fun onBindViewHolder(h: VH, pos: Int) {
         val ch = items[pos]
-        // Выводим порядковый номер (pos + 1)
         h.txtNumber.text = (pos + 1).toString()
         h.name.text = ch.name
         if (ch.logo.isNotBlank()) h.logo.load(ch.logo) { crossfade(true); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) } else h.logo.setImageResource(android.R.color.darker_gray)

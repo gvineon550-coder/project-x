@@ -2,6 +2,7 @@ package com.tvplayer.app
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -20,6 +21,10 @@ class MainActivity : AppCompatActivity() {
         b.btnRefresh.setOnClickListener { load() }
         b.btnExit.setOnClickListener { exitApp() }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+        // ПЕРЕХВАТ КНОПКИ "НАЗАД" ПУЛЬТА = ПОЛНЫЙ ВЫХОД
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { exitApp() }
+        })
         load()
     }
     private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
@@ -44,7 +49,6 @@ class MainActivity : AppCompatActivity() {
         allChannels.forEach { it.isFavorite = favs.contains(it.url) }
         val sorted = allChannels.sortedByDescending { it.isFavorite }
         val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
-        // Выводим количество каналов в заголовке
         b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
         b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
         b.recycler.visibility = View.VISIBLE
