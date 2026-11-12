@@ -2,8 +2,7 @@ package com.tvplayer.app
 import android.content.Context
 object StreamCache {
     private const val PREFS = "stream_cache"
-    // Кэш живет 60 минут
-    private const val TTL_MS = 60 * 60 * 1000L 
+    private const val TTL_MS = 60 * 60 * 1000L // 1 час
     fun get(context: Context, channelUrl: String): String? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val entry = prefs.getString(channelUrl, null) ?: return null

@@ -1,10 +1,14 @@
 import yt_dlp
+import urllib.request
+import re
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://vk.com/",
     "Origin":  "https://vk.com",
 }
+
 def resolve(url):
     try:
         opts = {"quiet": True, "no_warnings": True, "skip_download": True, "http_headers": HEADERS}
@@ -29,6 +33,18 @@ def resolve(url):
         return "ERROR: " + str(e)
 
 def get_thumbnail(url):
+    # 1. Пытаемся достать картинку напрямую из HTML (самый точный способ)
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+            match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
+            if match:
+                return match.group(1)
+    except Exception:
+        pass
+    
+    # 2. Если HTML не сработал, пробуем через yt-dlp
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "http_headers": HEADERS}) as ydl:
             info = ydl.extract_info(url, download=False)
