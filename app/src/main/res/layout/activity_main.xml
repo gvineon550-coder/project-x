@@ -54,22 +54,9 @@
         android:padding="8dp"
         android:clipToPadding="false"
         app:layout_constraintTop_toBottomOf="@id/topBar"
-        app:layout_constraintBottom_toTopOf="@id/btnExit"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
-    <TextView
-        android:id="@+id/btnExit"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Выход (или BACK)"
-        android:textColor="@color/text_dim"
-        android:textSize="16sp"
-        android:gravity="center"
-        android:padding="20dp"
-        android:focusable="true"
-        android:clickable="true"
-        android:background="?attr/selectableItemBackground"
-        app:layout_constraintBottom_toBottomOf="parent" />
     <ProgressBar
         android:id="@+id/progress"
         android:layout_width="wrap_content"

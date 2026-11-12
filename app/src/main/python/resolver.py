@@ -2,16 +2,13 @@ import yt_dlp
 import urllib.request
 import re
 import socket
-
 socket.setdefaulttimeout(15)
-
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://vk.com/",
     "Origin":  "https://vk.com",
 }
-
 def resolve(url):
     try:
         opts = {"quiet": True, "no_warnings": True, "skip_download": True,
@@ -35,7 +32,6 @@ def resolve(url):
         return info.get("url") or "ERROR: no m3u8 found"
     except Exception as e:
         return "ERROR: " + str(e)
-
 def get_thumbnail(url):
     try:
         req = urllib.request.Request(url, headers=HEADERS)

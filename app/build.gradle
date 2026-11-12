@@ -13,8 +13,9 @@ android {
         applicationId = "com.tvplayer.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 21
+        versionCode = 22
         versionName = "1.0"
+        buildConfigField "String", "GITHUB_REPO", "\"${System.getenv('GITHUB_REPOSITORY') ?: 'user/tvplayer'}\""
         ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
     }
     signingConfigs {
@@ -31,7 +32,8 @@ android {
             minifyEnabled false
         }
     }
-    buildFeatures { viewBinding = true }
+    buildFeatures { viewBinding = true
+        buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -23,8 +23,11 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.tvplayer.app.databinding.ActivityPlayerBinding
 import kotlinx.coroutines.launch
+
 class PlayerActivity : AppCompatActivity() {
     private lateinit var b: ActivityPlayerBinding
     private var player: ExoPlayer? = null
@@ -36,14 +39,16 @@ class PlayerActivity : AppCompatActivity() {
     private var retryCount = 0
     private val MAX_RETRIES = 5
     private val RETRY_DELAY = 2000L
+    private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     private val handler = Handler(Looper.getMainLooper())
     private val hideControlsRunnable = Runnable {
         b.controlsOverlay.visibility = View.GONE
-        b.btnQuality.visibility = View.GONE
+        b.rightControls.visibility = View.GONE
         b.btnSleepTimer.visibility = View.GONE
         b.leftControls.visibility = View.GONE
     }
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         b = ActivityPlayerBinding.inflate(layoutInflater); setContentView(b.root)
@@ -58,26 +63,62 @@ class PlayerActivity : AppCompatActivity() {
         b.btnBack.setOnClickListener { finish() }
         b.btnExitApp.setOnClickListener { exitApp() }
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+        b.btnAspect.setOnClickListener { toggleAspect(); showControls() }
     }
+
+    private fun toggleAspect() {
+        currentResizeMode = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+            AspectRatioFrameLayout.RESIZE_MODE_FIT
+        } else {
+            AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        }
+        b.playerView.resizeMode = currentResizeMode
+        b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
+    }
+
     private fun exitApp() {
         handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
         finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid())
     }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (b.channelListPanel.visibility == View.VISIBLE) {
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) { b.channelListPanel.visibility = View.GONE; return true }
+            return super.dispatchKeyEvent(event)
+        }
         if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_RIGHT -> { switchChannel(-1); return true }
                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_DPAD_LEFT -> { switchChannel(1); return true }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { showControls(); return true }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { showChannelList(); return true }
             }
         }
         return super.dispatchKeyEvent(event)
     }
+
+    private fun showChannelList() {
+        val channels = names.mapIndexed { i, n -> Channel(n, urls.getOrNull(i) ?: "", "") }
+        b.channelListPanel.visibility = View.VISIBLE
+        b.controlsOverlay.visibility = View.GONE
+        b.rightControls.visibility = View.GONE
+        b.btnSleepTimer.visibility = View.GONE
+        b.leftControls.visibility = View.GONE
+        b.channelListRecycler.layoutManager = LinearLayoutManager(this)
+        b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
+            val idx = urls.indexOf(ch.url)
+            if (idx >= 0) { currentIndex = idx; startPlayback() }
+            b.channelListPanel.visibility = View.GONE
+        }
+        b.channelListRecycler.scrollToPosition(currentIndex)
+        b.channelListRecycler.post { b.channelListRecycler.findViewHolderForAdapterPosition(currentIndex)?.itemView?.requestFocus() }
+    }
+
     private fun switchChannel(direction: Int) {
         val newIndex = currentIndex + direction
         if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() }
     }
+
     private fun startPlayback() {
         getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
         val chNum = currentIndex + 1
@@ -90,15 +131,11 @@ class PlayerActivity : AppCompatActivity() {
         retryCount = 0
         val channelUrl = urls.getOrNull(currentIndex) ?: return
         val cached = StreamCache.get(this, channelUrl)
-        if (cached != null) {
-            play(cached)
-            return
-        }
+        if (cached != null) { play(cached); return }
         if (!NetworkUtils.isOnline(this)) {
             b.progress.visibility = View.GONE
-            b.errorText.text = "Нет подключения к интернету.\nПроверьте Wi-Fi или кабель."
-            b.errorLayout.visibility = View.VISIBLE
-            return
+            b.errorText.text = "Нет подключения к интернету."
+            b.errorLayout.visibility = View.VISIBLE; return
         }
         b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
@@ -108,6 +145,7 @@ class PlayerActivity : AppCompatActivity() {
             play(direct)
         }
     }
+
     private fun play(m3u8: String) {
         player?.release()
         val http = DefaultHttpDataSource.Factory()
@@ -139,6 +177,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         b.touchArea.setOnClickListener { if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls() }
     }
+
     private fun updateQualityButton(tracks: Tracks) {
         val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
         val selectedIndex = (0 until videoGroup.length).firstOrNull { videoGroup.isTrackSelected(it) } ?: return
@@ -147,6 +186,7 @@ class PlayerActivity : AppCompatActivity() {
         val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
         b.btnQuality.text = height + bitrate
     }
+
     private fun showQualityDialog() {
         val p = player ?: return
         val tracks = p.currentTracks
@@ -166,6 +206,7 @@ class PlayerActivity : AppCompatActivity() {
             else trackSelector.parameters = trackSelector.buildUponParameters().setOverrideForType(TrackSelectionOverride(videoGroup.getMediaTrackGroup(), which - 1)).build()
         }.show()
     }
+
     private fun handleError() {
         if (retryCount < MAX_RETRIES) {
             retryCount++; b.progress.visibility = View.VISIBLE; handler.postDelayed({ startPlayback() }, RETRY_DELAY)
@@ -173,14 +214,16 @@ class PlayerActivity : AppCompatActivity() {
             b.progress.visibility = View.GONE
             b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
             b.errorLayout.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE
-            b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
+            b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
         }
     }
+
     private fun showSleepTimerDialog() {
         val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
         val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
         AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which -> val mins = minutes[which]; if (mins == 0) cancelSleepTimer() else startSleepTimer(mins) }.show()
     }
+
     private fun startSleepTimer(minutes: Int) {
         sleepTimer?.cancel()
         val millis = minutes * 60 * 1000L
@@ -193,14 +236,17 @@ class PlayerActivity : AppCompatActivity() {
         }.start()
         showControls()
     }
+
     private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
+
     private fun showControls() {
         b.controlsOverlay.visibility = View.VISIBLE
-        b.btnQuality.visibility = View.VISIBLE
+        b.rightControls.visibility = View.VISIBLE
         b.btnSleepTimer.visibility = View.VISIBLE
         b.leftControls.visibility = View.VISIBLE
         handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 4000)
     }
+
     override fun onDestroy() {
         super.onDestroy(); handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
     }

@@ -43,7 +43,6 @@
         android:layout_height="48dp"
         android:padding="8dp"
         android:src="@android:drawable/btn_star_big_off"
-        android:clickable="true"
-        android:focusable="true"
-        android:background="?attr/selectableItemBackgroundBorderless" />
+        android:focusable="false"
+        android:clickable="false" />
 </LinearLayout>

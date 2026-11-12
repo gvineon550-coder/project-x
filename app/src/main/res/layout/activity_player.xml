@@ -15,6 +15,28 @@
         android:id="@+id/touchArea"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+    <LinearLayout
+        android:id="@+id/channelListPanel"
+        android:layout_width="320dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="#EE111111"
+        android:visibility="gone"
+        android:orientation="vertical"
+        android:elevation="8dp">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Выбор канала"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:padding="16dp" />
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/channelListRecycler"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </LinearLayout>
     <TextView
         android:id="@+id/channelNameOverlay"
         android:layout_width="wrap_content"
@@ -60,7 +82,7 @@
             android:background="#AA000000"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
-            android:text="← Назад"
+            android:text="← В список"
             android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:textStyle="bold"
@@ -97,22 +119,42 @@
         android:clickable="true"
         android:focusable="true"
         android:visibility="gone" />
-    <TextView
-        android:id="@+id/btnQuality"
+    <LinearLayout
+        android:id="@+id/rightControls"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|end"
         android:layout_margin="24dp"
-        android:background="#AA000000"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="8dp"
-        android:text="Auto"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:clickable="true"
-        android:focusable="true"
-        android:visibility="gone" />
+        android:orientation="vertical"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/btnQuality"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#AA000000"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:text="Auto"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true" />
+        <TextView
+            android:id="@+id/btnAspect"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="#AA000000"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:text="Заполнить"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
     <ProgressBar
         android:id="@+id/progress"
         android:layout_width="wrap_content"
