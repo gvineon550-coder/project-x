@@ -94,6 +94,12 @@ class PlayerActivity : AppCompatActivity() {
             play(cached)
             return
         }
+        if (!NetworkUtils.isOnline(this)) {
+            b.progress.visibility = View.GONE
+            b.errorText.text = "Нет подключения к интернету.\nПроверьте Wi-Fi или кабель."
+            b.errorLayout.visibility = View.VISIBLE
+            return
+        }
         b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val direct = StreamResolver.resolve(channelUrl)

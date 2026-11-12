@@ -1,6 +1,9 @@
 import yt_dlp
 import urllib.request
 import re
+import socket
+
+socket.setdefaulttimeout(15)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -11,7 +14,8 @@ HEADERS = {
 
 def resolve(url):
     try:
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "http_headers": HEADERS}
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                "http_headers": HEADERS, "socket_timeout": 15}
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         if info.get("url") and ".m3u8" in info["url"]:
@@ -35,7 +39,7 @@ def resolve(url):
 def get_thumbnail(url):
     try:
         req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:
             html = response.read().decode('utf-8', errors='ignore')
             match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
             if match:
@@ -43,7 +47,8 @@ def get_thumbnail(url):
     except Exception:
         pass
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "http_headers": HEADERS}) as ydl:
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True,
+                               "http_headers": HEADERS, "socket_timeout": 15}) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get("thumbnail", "")
     except Exception:

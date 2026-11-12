@@ -17,7 +17,6 @@ class ChannelAdapter(private val items: List<Channel>, private val onClick: (Cha
         h.txtNumber.text = (pos + 1).toString()
         h.name.text = ch.name
         if (ch.logo.isNotBlank()) {
-            // size(160, 160) сжимает картинку перед кэшированием, экономя память
             h.logo.load(ch.logo) { 
                 crossfade(true)
                 size(160, 160)

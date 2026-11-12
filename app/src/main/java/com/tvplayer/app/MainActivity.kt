@@ -19,7 +19,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var showOnlyFavorites = false
     private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
 
-    // ОГРАНИЧИВАЕМ КЭШ КАРТИНОК ДО 15 МБ
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .diskCache {
@@ -43,9 +42,23 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         })
         load()
     }
+
     private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
+
     private fun load() {
-        b.progress.visibility = View.VISIBLE; b.error.visibility = View.GONE; b.recycler.visibility = View.GONE
+        // ПРОВЕРКА ИНТЕРНЕТА ПЕРЕД ОБРАЩЕНИЕМ К VK
+        if (!NetworkUtils.isOnline(this)) {
+            b.progress.visibility = View.GONE
+            b.recycler.visibility = View.GONE
+            b.error.text = "Нет подключения к интернету.\nПроверьте Wi-Fi или кабель и нажмите «Обновить»."
+            b.error.visibility = View.VISIBLE
+            return
+        }
+
+        b.progress.visibility = View.VISIBLE
+        b.error.visibility = View.GONE
+        b.recycler.visibility = View.GONE
+
         lifecycleScope.launch {
             val (manual, cat) = readConfig()
             val manualWithLogos = manual.map { ch ->
@@ -56,10 +69,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             }
             allChannels = loadChannels(cat, manualWithLogos)
             b.progress.visibility = View.GONE
-            if (allChannels.isEmpty()) { b.error.text = getString(R.string.error_load); b.error.visibility = View.VISIBLE; return@launch }
+            if (allChannels.isEmpty()) {
+                b.error.text = "Не удалось загрузить список каналов."
+                b.error.visibility = View.VISIBLE
+                return@launch
+            }
             updateView()
         }
     }
+
     private fun updateView() {
         val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
         allChannels.forEach { it.isFavorite = favs.contains(it.url) }
@@ -82,6 +100,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         })
         b.recycler.post { b.recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() }
     }
+
     private fun readConfig(): Pair<List<Channel>, String> {
         val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
         val o = JSONObject(json); val manual = mutableListOf<Channel>()
