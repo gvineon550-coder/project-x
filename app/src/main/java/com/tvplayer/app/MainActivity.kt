@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import coil.ImageLoader
@@ -24,6 +25,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var allChannels: List<Channel> = emptyList()
     private var showOnlyFavorites = false
     private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
+    private var backPressedTime: Long = 0
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
@@ -32,6 +34,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     }
 
     override fun onCreate(s: Bundle?) {
+        installSplashScreen()
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
@@ -42,9 +45,18 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b.btnFavFilter.nextFocusDownId = R.id.recycler
         b.btnRefresh.nextFocusDownId = R.id.recycler
         b.btnSettings.nextFocusDownId = R.id.recycler
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { exitApp() }
+            override fun handleOnBackPressed() {
+                if (System.currentTimeMillis() - backPressedTime < 2000) {
+                    exitApp()
+                } else {
+                    Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
+                    backPressedTime = System.currentTimeMillis()
+                }
+            }
         })
+
         load()
         checkForUpdates()
     }
@@ -57,7 +69,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
-    // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
     private fun exitApp() {
         finishAffinity()
         android.os.Process.killProcess(android.os.Process.myPid())

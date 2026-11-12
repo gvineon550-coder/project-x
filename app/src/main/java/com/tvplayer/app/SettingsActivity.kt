@@ -62,7 +62,6 @@ class SettingsActivity : AppCompatActivity() {
             updateCacheInfo()
         }
 
-        // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
         b.btnExitApp.setOnClickListener {
             finishAffinity()
             android.os.Process.killProcess(android.os.Process.myPid())
