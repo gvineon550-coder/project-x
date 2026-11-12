@@ -57,7 +57,11 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
-    private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
+    // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
+    private fun exitApp() {
+        finishAffinity()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
 
     private fun checkForUpdates() {
         lifecycleScope.launch {

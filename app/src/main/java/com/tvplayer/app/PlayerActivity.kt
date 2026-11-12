@@ -56,6 +56,30 @@ class PlayerActivity : AppCompatActivity() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+        // НАСТРОЙКА ФОКУСА МЕЖДУ КНОПКАМИ ПЛЕЕРА (чтобы пульт мог до них добраться)
+        b.btnPlayPause.nextFocusUpId = R.id.btnSleepTimer
+        b.btnPlayPause.nextFocusLeftId = R.id.btnBack
+        b.btnPlayPause.nextFocusRightId = R.id.btnQuality
+
+        b.btnSleepTimer.nextFocusDownId = R.id.btnPlayPause
+        b.btnSleepTimer.nextFocusLeftId = R.id.btnBack
+        b.btnSleepTimer.nextFocusRightId = R.id.btnQuality
+
+        b.btnQuality.nextFocusDownId = R.id.btnAspect
+        b.btnQuality.nextFocusLeftId = R.id.btnSleepTimer
+        b.btnQuality.nextFocusUpId = R.id.btnPlayPause
+
+        b.btnAspect.nextFocusUpId = R.id.btnQuality
+        b.btnAspect.nextFocusLeftId = R.id.btnPlayPause
+
+        b.btnBack.nextFocusDownId = R.id.btnPlayPause
+        b.btnBack.nextFocusRightId = R.id.btnExitApp
+
+        b.btnExitApp.nextFocusDownId = R.id.btnPlayPause
+        b.btnExitApp.nextFocusLeftId = R.id.btnBack
+        b.btnExitApp.nextFocusRightId = R.id.btnSleepTimer
+
         names = intent.getStringArrayListExtra("names") ?: emptyList()
         urls = intent.getStringArrayListExtra("urls") ?: emptyList()
         currentIndex = intent.getIntExtra("index", 0)
@@ -78,15 +102,25 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun exitApp() {
         handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
-        finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid())
+        finishAffinity()
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 1. Панель каналов открыта — BACK закрывает её и возвращает контролы
         if (b.channelListPanel.visibility == View.VISIBLE) {
-            if (event.keyCode == KeyEvent.KEYCODE_BACK) { b.channelListPanel.visibility = View.GONE; return true }
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                b.channelListPanel.visibility = View.GONE
+                showControls()
+                return true
+            }
             return super.dispatchKeyEvent(event)
         }
-        if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+        // 2. Контролы видны — пусть пульт работает по nextFocus*-Id
+        if (b.controlsOverlay.visibility == View.VISIBLE) {
+            return super.dispatchKeyEvent(event)
+        }
+        // 3. Обычный режим — зэппинг и открытие панели
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_RIGHT -> { switchChannel(-1); return true }
@@ -244,7 +278,9 @@ class PlayerActivity : AppCompatActivity() {
         b.rightControls.visibility = View.VISIBLE
         b.btnSleepTimer.visibility = View.VISIBLE
         b.leftControls.visibility = View.VISIBLE
-        handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 4000)
+        // ПРИНУДИТЕЛЬНО ставим фокус на центральную кнопку Play/Pause
+        b.btnPlayPause.requestFocus()
+        handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 5000)
     }
 
     override fun onDestroy() {

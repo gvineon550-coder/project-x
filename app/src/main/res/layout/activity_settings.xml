@@ -48,71 +48,124 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="24dp">
-            <TextView
-                android:id="@+id/txtVersion"
+            android:padding="16dp">
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Версия: ..."
-                android:textColor="@color/text"
-                android:textSize="20sp"
-                android:textStyle="bold"
-                android:paddingBottom="8dp" />
-            <TextView
-                android:id="@+id/txtStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:textColor="#FFEB3B"
-                android:textSize="16sp"
-                android:paddingBottom="24dp" />
-            <TextView
-                android:id="@+id/btnCheckUpdate"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="🔄 Проверить обновления"
-                android:textColor="@color/text"
-                android:textSize="18sp"
-                android:textStyle="bold"
+                android:orientation="vertical"
+                android:background="@drawable/card_bg"
                 android:padding="20dp"
-                android:focusable="true"
-                android:clickable="true"
-                android:background="@drawable/tile_selector"
-                android:layout_marginBottom="12dp" />
-            <TextView
-                android:id="@+id/btnClearCache"
+                android:layout_marginBottom="16dp">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ОБНОВЛЕНИЯ"
+                    android:textColor="#FF8A8D93"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1"
+                    android:paddingBottom="12dp" />
+                <TextView
+                    android:id="@+id/txtVersion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="TV Player"
+                    android:textColor="@color/text"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/txtStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Проверка обновлений..."
+                    android:textColor="#FF8A8D93"
+                    android:textSize="14sp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="16dp" />
+                <TextView
+                    android:id="@+id/btnCheckUpdate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🔄 Проверить обновления"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:padding="16dp"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:background="@drawable/button_accent_bg" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🗑 Очистить кэш"
-                android:textColor="@color/text"
-                android:textSize="18sp"
-                android:textStyle="bold"
+                android:orientation="vertical"
+                android:background="@drawable/card_bg"
                 android:padding="20dp"
-                android:focusable="true"
-                android:clickable="true"
-                android:background="@drawable/tile_selector"
-                android:layout_marginBottom="12dp" />
+                android:layout_marginBottom="16dp">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ПАМЯТЬ"
+                    android:textColor="#FF8A8D93"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1"
+                    android:paddingBottom="12dp" />
+                <TextView
+                    android:id="@+id/btnClearCache"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🗑 Очистить кэш"
+                    android:textColor="@color/text"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:padding="16dp"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:background="@drawable/tile_selector" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/card_bg"
+                android:padding="20dp"
+                android:layout_marginBottom="16dp">
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="О ПРОГРАММЕ"
+                    android:textColor="#FF8A8D93"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1"
+                    android:paddingBottom="12dp" />
+                <TextView
+                    android:id="@+id/txtAbout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text"
+                    android:textSize="14sp"
+                    android:lineSpacingExtra="4dp" />
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/btnExitApp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="✕ Выход из приложения"
-                android:textColor="#FF8888"
-                android:textSize="18sp"
+                android:textColor="#FFFF6B6B"
+                android:textSize="16sp"
                 android:textStyle="bold"
+                android:gravity="center"
                 android:padding="20dp"
                 android:focusable="true"
                 android:clickable="true"
-                android:background="@drawable/tile_selector"
-                android:layout_marginBottom="24dp" />
-            <TextView
-                android:id="@+id/txtAbout"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:textColor="@color/text_dim"
-                android:textSize="14sp"
-                android:paddingTop="16dp" />
+                android:background="@drawable/card_bg" />
         </LinearLayout>
     </ScrollView>
 </androidx.constraintlayout.widget.ConstraintLayout>

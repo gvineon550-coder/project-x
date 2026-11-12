@@ -1,6 +1,7 @@
 package com.tvplayer.app
 import android.app.AlertDialog
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -21,29 +22,35 @@ class SettingsActivity : AppCompatActivity() {
         b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
 
         b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
-        b.txtAbout.text = "Приложение для просмотра VK Live.\nРезолвер: yt-dlp\nПлеер: Media3 (ExoPlayer)\nРепозиторий: ${BuildConfig.GITHUB_REPO}"
+        b.txtAbout.text = """
+            Лёгкое и быстрое приложение для просмотра телеканалов VK Live на телефоне и ТВ-приставке.
+            
+            🎯 ВОЗМОЖНОСТИ:
+            • Просмотр каналов VK Live в высоком качестве
+            • Автоматическая подгрузка списка каналов
+            • Выбор качества видео и формата экрана
+            • Избранное (долгое нажатие ОК)
+            • Переключение каналов пультом вверх/вниз
+            • Панель каналов прямо в плеере (нажатие ОК)
+            • Таймер сна (от 5 минут до 5 часов)
+            • Авто-обновление приложения
+            • Умное кэширование ссылок и очистка кэша
+            
+            ⚙️ ТЕХНОЛОГИИ:
+            • Резолвер: yt-dlp (Python + Chaquopy)
+            • Плеер: AndroidX Media3 (ExoPlayer)
+            • Сборка: GitHub Actions (CI/CD)
+            
+            🔄 Обновления выходят автоматически. При запуске приложение само проверяет наличие новой версии и предлагает обновиться.
+            
+            ❤️ Сделано с любовью для семьи и друзей.
+        """.trimIndent()
 
         updateCacheInfo()
 
         b.btnBack.setOnClickListener { finish() }
-
-        b.btnCheckUpdate.setOnClickListener {
-            b.txtStatus.text = "Проверка обновлений..."
-            lifecycleScope.launch {
-                val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
-                if (info == null) {
-                    b.txtStatus.text = "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})"
-                } else {
-                    b.txtStatus.text = "🎉 Доступна версия v${info.versionCode}"
-                    AlertDialog.Builder(this@SettingsActivity)
-                        .setTitle("Доступно обновление v${info.versionCode}")
-                        .setMessage(info.changelog.take(400))
-                        .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
-                        .setNegativeButton("Позже", null)
-                        .show()
-                }
-            }
-        }
+        checkUpdate(silent = true)
+        b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
 
         b.btnClearCache.setOnClickListener {
             val imageLoader = Coil.imageLoader(this)
@@ -55,9 +62,32 @@ class SettingsActivity : AppCompatActivity() {
             updateCacheInfo()
         }
 
+        // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
         b.btnExitApp.setOnClickListener {
-            finishAndRemoveTask()
+            finishAffinity()
             android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
+    private fun checkUpdate(silent: Boolean) {
+        b.txtStatus.text = "⏳ Проверка обновлений..."
+        b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
+        lifecycleScope.launch {
+            val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
+            if (info == null) {
+                b.txtStatus.text = "✅ У вас актуальная версия"
+                b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80"))
+                if (!silent) Toast.makeText(this@SettingsActivity, "Обновлений нет", Toast.LENGTH_SHORT).show()
+            } else {
+                b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
+                b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
+                AlertDialog.Builder(this@SettingsActivity)
+                    .setTitle("Доступно обновление v${info.versionCode}")
+                    .setMessage(info.changelog.take(400))
+                    .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
+                    .setNegativeButton("Позже", null)
+                    .show()
+            }
         }
     }
 
