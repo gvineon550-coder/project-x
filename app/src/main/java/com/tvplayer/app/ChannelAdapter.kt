@@ -17,9 +17,15 @@ class ChannelAdapter(private val items: List<Channel>, private val onClick: (Cha
         h.txtNumber.text = (pos + 1).toString()
         h.name.text = ch.name
         if (ch.logo.isNotBlank()) {
-            h.logo.load(ch.logo) { crossfade(true); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+            // size(160, 160) сжимает картинку перед кэшированием, экономя память
+            h.logo.load(ch.logo) { 
+                crossfade(true)
+                size(160, 160)
+                placeholder(android.R.color.darker_gray)
+                error(android.R.color.darker_gray)
+            }
         } else {
-            h.logo.load(null) // Очищаем предыдущую картинку, чтобы не прилипала
+            h.logo.load(null)
             h.logo.setImageDrawable(null)
         }
         if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }

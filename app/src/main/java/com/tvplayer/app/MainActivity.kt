@@ -6,14 +6,31 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
 import com.tvplayer.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-class MainActivity : AppCompatActivity() {
+
+class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var b: ActivityMainBinding
     private var allChannels: List<Channel> = emptyList()
     private var showOnlyFavorites = false
     private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
+
+    // ОГРАНИЧИВАЕМ КЭШ КАРТИНОК ДО 15 МБ
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(15L * 1024L * 1024L)
+                    .build()
+            }
+            .build()
+    }
+
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)

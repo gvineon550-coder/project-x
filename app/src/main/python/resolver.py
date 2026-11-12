@@ -33,7 +33,6 @@ def resolve(url):
         return "ERROR: " + str(e)
 
 def get_thumbnail(url):
-    # 1. Пытаемся достать картинку напрямую из HTML (самый точный способ)
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -43,8 +42,6 @@ def get_thumbnail(url):
                 return match.group(1)
     except Exception:
         pass
-    
-    # 2. Если HTML не сработал, пробуем через yt-dlp
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "http_headers": HEADERS}) as ydl:
             info = ydl.extract_info(url, download=False)
