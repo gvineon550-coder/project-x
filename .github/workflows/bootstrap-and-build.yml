@@ -36,9 +36,9 @@ jobs:
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 1: XML и Манифест (Верстка с номерами)
+      # ШАГ 1: XML (Манифест, Верстка + фокус кнопок)
       # ═══════════════════════════════════════════════════
-      - name: "📦 Генерация XML (Манифест и верстка)"
+      - name: "📦 Генерация XML (с фокусом и кнопкой Выход в плеере)"
         run: |
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -74,7 +74,6 @@ jobs:
           </manifest>
           EOF
 
-          # Карточка канала с номером
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -88,8 +87,6 @@ jobs:
               android:clickable="true"
               android:layout_marginBottom="4dp"
               android:gravity="center_vertical">
-
-              <!-- Номер канала -->
               <TextView
                   android:id="@+id/txtNumber"
                   android:layout_width="40dp"
@@ -98,7 +95,6 @@ jobs:
                   android:textColor="@color/text_dim"
                   android:textSize="16sp"
                   android:textStyle="bold" />
-
               <ImageView
                   android:id="@+id/logo"
                   android:layout_width="80dp"
@@ -165,6 +161,8 @@ jobs:
                       android:textSize="16sp"
                       android:textStyle="bold"
                       android:padding="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
                   <TextView
                       android:id="@+id/btnRefresh"
@@ -174,6 +172,8 @@ jobs:
                       android:textColor="@color/text_dim"
                       android:textSize="16sp"
                       android:padding="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
               </LinearLayout>
               <androidx.recyclerview.widget.RecyclerView
@@ -190,11 +190,13 @@ jobs:
                   android:id="@+id/btnExit"
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:text="Выход"
+                  android:text="Выход (или BACK)"
                   android:textColor="@color/text_dim"
                   android:textSize="16sp"
                   android:gravity="center"
                   android:padding="20dp"
+                  android:focusable="true"
+                  android:clickable="true"
                   android:background="?attr/selectableItemBackground"
                   app:layout_constraintBottom_toBottomOf="parent" />
               <ProgressBar
@@ -218,6 +220,7 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
+          # Плеер с кнопкой "Выход" (полное закрытие)
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -266,22 +269,43 @@ jobs:
                       android:clickable="true"
                       android:focusable="true" />
               </LinearLayout>
-              <TextView
-                  android:id="@+id/btnBack"
+              <!-- Группа кнопок: Назад + Выход -->
+              <LinearLayout
+                  android:id="@+id/leftControls"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:layout_gravity="top|start"
                   android:layout_margin="24dp"
-                  android:background="#AA000000"
-                  android:paddingHorizontal="16dp"
-                  android:paddingVertical="8dp"
-                  android:text="← Назад"
-                  android:textColor="#FFFFFF"
-                  android:textSize="16sp"
-                  android:textStyle="bold"
-                  android:clickable="true"
-                  android:focusable="true"
-                  android:visibility="gone" />
+                  android:orientation="horizontal"
+                  android:visibility="gone">
+                  <TextView
+                      android:id="@+id/btnBack"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:background="#AA000000"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="← Назад"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+                  <TextView
+                      android:id="@+id/btnExitApp"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginStart="8dp"
+                      android:background="#AA000000"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="✕ Выход"
+                      android:textColor="#FF8888"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
               <TextView
                   android:id="@+id/btnSleepTimer"
                   android:layout_width="wrap_content"
@@ -400,9 +424,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin (Адаптер с номерами и Логика)
+      # ШАГ 3: Kotlin (Список + onBackPressed)
       # ═══════════════════════════════════════════════════
-      - name: "🧠 Обновление Kotlin (Адаптер и Список)"
+      - name: "🧠 Обновление Kotlin (Список + Back = Выход)"
         run: |
           cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'EOF'
           package com.tvplayer.app
@@ -425,7 +449,6 @@ jobs:
           }
           EOF
 
-          # Добавляем обработку номеров в адаптер
           cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
           package com.tvplayer.app
           import android.view.*
@@ -443,7 +466,6 @@ jobs:
               override fun onCreateViewHolder(p: ViewGroup, t: Int): VH = VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
               override fun onBindViewHolder(h: VH, pos: Int) {
                   val ch = items[pos]
-                  // Выводим порядковый номер (pos + 1)
                   h.txtNumber.text = (pos + 1).toString()
                   h.name.text = ch.name
                   if (ch.logo.isNotBlank()) h.logo.load(ch.logo) { crossfade(true); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) } else h.logo.setImageResource(android.R.color.darker_gray)
@@ -460,6 +482,7 @@ jobs:
           import android.content.Intent
           import android.os.Bundle
           import android.view.View
+          import androidx.activity.OnBackPressedCallback
           import androidx.appcompat.app.AppCompatActivity
           import androidx.lifecycle.lifecycleScope
           import androidx.recyclerview.widget.LinearLayoutManager
@@ -478,6 +501,10 @@ jobs:
                   b.btnRefresh.setOnClickListener { load() }
                   b.btnExit.setOnClickListener { exitApp() }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+                  // ПЕРЕХВАТ КНОПКИ "НАЗАД" ПУЛЬТА = ПОЛНЫЙ ВЫХОД
+                  onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                      override fun handleOnBackPressed() { exitApp() }
+                  })
                   load()
               }
               private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
@@ -502,7 +529,6 @@ jobs:
                   allChannels.forEach { it.isFavorite = favs.contains(it.url) }
                   val sorted = allChannels.sortedByDescending { it.isFavorite }
                   val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
-                  // Выводим количество каналов в заголовке
                   b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
                   b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
                   b.recycler.visibility = View.VISIBLE
@@ -531,9 +557,9 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 4: Kotlin (Плеер) и Сборка
+      # ШАГ 4: Kotlin (Плеер с кнопкой Выход)
       # ═══════════════════════════════════════════════════
-      - name: "🎬 Финал (Плеер и версия)"
+      - name: "🎬 Плеер (с кнопкой Выход) + сборка"
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
@@ -575,7 +601,12 @@ jobs:
               private val MAX_RETRIES = 5
               private val RETRY_DELAY = 2000L
               private val handler = Handler(Looper.getMainLooper())
-              private val hideControlsRunnable = Runnable { b.controlsOverlay.visibility = View.GONE; b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.btnBack.visibility = View.GONE }
+              private val hideControlsRunnable = Runnable {
+                  b.controlsOverlay.visibility = View.GONE
+                  b.btnQuality.visibility = View.GONE
+                  b.btnSleepTimer.visibility = View.GONE
+                  b.leftControls.visibility = View.GONE
+              }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
@@ -589,7 +620,17 @@ jobs:
                   currentIndex = intent.getIntExtra("index", 0)
                   startPlayback()
                   b.btnBack.setOnClickListener { finish() }
+                  b.btnExitApp.setOnClickListener { exitApp() }
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+              }
+              // Полное закрытие приложения
+              private fun exitApp() {
+                  handler.removeCallbacksAndMessages(null)
+                  sleepTimer?.cancel()
+                  player?.release()
+                  player = null
+                  finishAndRemoveTask()
+                  android.os.Process.killProcess(android.os.Process.myPid())
               }
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                   if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
@@ -608,7 +649,6 @@ jobs:
               }
               private fun startPlayback() {
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
-                  // В оверлее показываем номер канала и его название
                   val chNum = currentIndex + 1
                   val chName = names.getOrNull(currentIndex) ?: "Канал"
                   b.channelNameOverlay.text = "$chNum. $chName"
@@ -686,7 +726,7 @@ jobs:
                       b.progress.visibility = View.GONE
                       b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
                       b.errorLayout.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE
-                      b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.btnBack.visibility = View.GONE
+                      b.btnQuality.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
                   }
               }
               private fun showSleepTimerDialog() {
@@ -702,13 +742,16 @@ jobs:
                           val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60
                           b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
                       }
-                      override fun onFinish() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
+                      override fun onFinish() { exitApp() }
                   }.start()
                   showControls()
               }
               private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
               private fun showControls() {
-                  b.controlsOverlay.visibility = View.VISIBLE; b.btnQuality.visibility = View.VISIBLE; b.btnSleepTimer.visibility = View.VISIBLE; b.btnBack.visibility = View.VISIBLE
+                  b.controlsOverlay.visibility = View.VISIBLE
+                  b.btnQuality.visibility = View.VISIBLE
+                  b.btnSleepTimer.visibility = View.VISIBLE
+                  b.leftControls.visibility = View.VISIBLE
                   handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 4000)
               }
               override fun onDestroy() {
@@ -722,7 +765,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: channel numbering and total count" || echo "no changes"
+          git commit -m "feat: back key exits app, exit button in player" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
