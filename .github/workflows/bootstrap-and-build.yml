@@ -25,7 +25,6 @@ jobs:
         run: |
           LATEST=$(curl -s https://pypi.org/pypi/yt-dlp/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])")
           LAST_BUILT=$(cat .last_ytdlp_version 2>/dev/null || echo "none")
-          echo "PyPI: $LATEST | Вшита: $LAST_BUILT | Триггер: ${{ github.event_name }}"
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$LATEST" = "$LAST_BUILT" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
@@ -120,6 +119,43 @@ jobs:
           <paths>
               <cache-path name="cache" path="." />
           </paths>
+          EOF
+
+          cat > app/src/main/res/drawable/card_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF1C1F26" />
+                      <stroke android:width="2dp" android:color="#FFFFFFFF" />
+                      <corners android:radius="14dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF1C1F26" />
+                      <corners android:radius="14dp" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          cat > app/src/main/res/drawable/button_accent_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF3B82F6" />
+                      <corners android:radius="12dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF2563EB" />
+                      <corners android:radius="12dp" />
+                  </shape>
+              </item>
+          </selector>
           EOF
 
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
@@ -265,7 +301,6 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
-          # НОВЫЙ экран настроек
           cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <androidx.constraintlayout.widget.ConstraintLayout
@@ -317,71 +352,124 @@ jobs:
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
                       android:orientation="vertical"
-                      android:padding="24dp">
-                      <TextView
-                          android:id="@+id/txtVersion"
+                      android:padding="16dp">
+
+                      <LinearLayout
                           android:layout_width="match_parent"
                           android:layout_height="wrap_content"
-                          android:text="Версия: ..."
-                          android:textColor="@color/text"
-                          android:textSize="20sp"
-                          android:textStyle="bold"
-                          android:paddingBottom="8dp" />
-                      <TextView
-                          android:id="@+id/txtStatus"
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:text=""
-                          android:textColor="#FFEB3B"
-                          android:textSize="16sp"
-                          android:paddingBottom="24dp" />
-                      <TextView
-                          android:id="@+id/btnCheckUpdate"
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:text="🔄 Проверить обновления"
-                          android:textColor="@color/text"
-                          android:textSize="18sp"
-                          android:textStyle="bold"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
                           android:padding="20dp"
-                          android:focusable="true"
-                          android:clickable="true"
-                          android:background="@drawable/tile_selector"
-                          android:layout_marginBottom="12dp" />
-                      <TextView
-                          android:id="@+id/btnClearCache"
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="ОБНОВЛЕНИЯ"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/txtVersion"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="TV Player"
+                              android:textColor="@color/text"
+                              android:textSize="20sp"
+                              android:textStyle="bold" />
+                          <TextView
+                              android:id="@+id/txtStatus"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="Проверка обновлений..."
+                              android:textColor="#FF8A8D93"
+                              android:textSize="14sp"
+                              android:paddingTop="6dp"
+                              android:paddingBottom="16dp" />
+                          <TextView
+                              android:id="@+id/btnCheckUpdate"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🔄 Проверить обновления"
+                              android:textColor="#FFFFFFFF"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:gravity="center"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/button_accent_bg" />
+                      </LinearLayout>
+
+                      <LinearLayout
                           android:layout_width="match_parent"
                           android:layout_height="wrap_content"
-                          android:text="🗑 Очистить кэш"
-                          android:textColor="@color/text"
-                          android:textSize="18sp"
-                          android:textStyle="bold"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
                           android:padding="20dp"
-                          android:focusable="true"
-                          android:clickable="true"
-                          android:background="@drawable/tile_selector"
-                          android:layout_marginBottom="12dp" />
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="ПАМЯТЬ"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/btnClearCache"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🗑 Очистить кэш"
+                              android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
+                          android:padding="20dp"
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="О ПРОГРАММЕ"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/txtAbout"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:textColor="@color/text"
+                              android:textSize="14sp"
+                              android:lineSpacingExtra="4dp" />
+                      </LinearLayout>
+
                       <TextView
                           android:id="@+id/btnExitApp"
                           android:layout_width="match_parent"
                           android:layout_height="wrap_content"
                           android:text="✕ Выход из приложения"
-                          android:textColor="#FF8888"
-                          android:textSize="18sp"
+                          android:textColor="#FFFF6B6B"
+                          android:textSize="16sp"
                           android:textStyle="bold"
+                          android:gravity="center"
                           android:padding="20dp"
                           android:focusable="true"
                           android:clickable="true"
-                          android:background="@drawable/tile_selector"
-                          android:layout_marginBottom="24dp" />
-                      <TextView
-                          android:id="@+id/txtAbout"
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:text=""
-                          android:textColor="@color/text_dim"
-                          android:textSize="14sp"
-                          android:paddingTop="16dp" />
+                          android:background="@drawable/card_bg" />
                   </LinearLayout>
               </ScrollView>
           </androidx.constraintlayout.widget.ConstraintLayout>
@@ -894,7 +982,7 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 4: MainActivity
+      # ШАГ 4: MainActivity (с фиксом exitApp)
       # ═══════════════════════════════════════════════════
       - name: "🧠 MainActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -959,7 +1047,11 @@ jobs:
                   }
               }
 
-              private fun exitApp() { finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid()) }
+              // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
+              private fun exitApp() {
+                  finishAffinity()
+                  android.os.Process.killProcess(android.os.Process.myPid())
+              }
 
               private fun checkForUpdates() {
                   lifecycleScope.launch {
@@ -1065,7 +1157,7 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 5: SettingsActivity (НОВЫЙ)
+      # ШАГ 5: SettingsActivity (с фиксом exit)
       # ═══════════════════════════════════════════════════
       - name: "⚙ SettingsActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -1074,6 +1166,7 @@ jobs:
           package com.tvplayer.app
           import android.app.AlertDialog
           import android.content.Intent
+          import android.graphics.Color
           import android.net.Uri
           import android.os.Bundle
           import android.provider.Settings
@@ -1094,29 +1187,35 @@ jobs:
                   b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
 
                   b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
-                  b.txtAbout.text = "Приложение для просмотра VK Live.\nРезолвер: yt-dlp\nПлеер: Media3 (ExoPlayer)\nРепозиторий: ${BuildConfig.GITHUB_REPO}"
+                  b.txtAbout.text = """
+                      Лёгкое и быстрое приложение для просмотра телеканалов VK Live на телефоне и ТВ-приставке.
+                      
+                      🎯 ВОЗМОЖНОСТИ:
+                      • Просмотр каналов VK Live в высоком качестве
+                      • Автоматическая подгрузка списка каналов
+                      • Выбор качества видео и формата экрана
+                      • Избранное (долгое нажатие ОК)
+                      • Переключение каналов пультом вверх/вниз
+                      • Панель каналов прямо в плеере (нажатие ОК)
+                      • Таймер сна (от 5 минут до 5 часов)
+                      • Авто-обновление приложения
+                      • Умное кэширование ссылок и очистка кэша
+                      
+                      ⚙️ ТЕХНОЛОГИИ:
+                      • Резолвер: yt-dlp (Python + Chaquopy)
+                      • Плеер: AndroidX Media3 (ExoPlayer)
+                      • Сборка: GitHub Actions (CI/CD)
+                      
+                      🔄 Обновления выходят автоматически. При запуске приложение само проверяет наличие новой версии и предлагает обновиться.
+                      
+                      ❤️ Сделано с любовью для семьи и друзей.
+                  """.trimIndent()
 
                   updateCacheInfo()
 
                   b.btnBack.setOnClickListener { finish() }
-
-                  b.btnCheckUpdate.setOnClickListener {
-                      b.txtStatus.text = "Проверка обновлений..."
-                      lifecycleScope.launch {
-                          val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
-                          if (info == null) {
-                              b.txtStatus.text = "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})"
-                          } else {
-                              b.txtStatus.text = "🎉 Доступна версия v${info.versionCode}"
-                              AlertDialog.Builder(this@SettingsActivity)
-                                  .setTitle("Доступно обновление v${info.versionCode}")
-                                  .setMessage(info.changelog.take(400))
-                                  .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
-                                  .setNegativeButton("Позже", null)
-                                  .show()
-                          }
-                      }
-                  }
+                  checkUpdate(silent = true)
+                  b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
 
                   b.btnClearCache.setOnClickListener {
                       val imageLoader = Coil.imageLoader(this)
@@ -1128,9 +1227,32 @@ jobs:
                       updateCacheInfo()
                   }
 
+                  // ИСПРАВЛЕНО: finishAffinity закрывает ВСЕ активити, потом killProcess
                   b.btnExitApp.setOnClickListener {
-                      finishAndRemoveTask()
+                      finishAffinity()
                       android.os.Process.killProcess(android.os.Process.myPid())
+                  }
+              }
+
+              private fun checkUpdate(silent: Boolean) {
+                  b.txtStatus.text = "⏳ Проверка обновлений..."
+                  b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
+                  lifecycleScope.launch {
+                      val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
+                      if (info == null) {
+                          b.txtStatus.text = "✅ У вас актуальная версия"
+                          b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80"))
+                          if (!silent) Toast.makeText(this@SettingsActivity, "Обновлений нет", Toast.LENGTH_SHORT).show()
+                      } else {
+                          b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
+                          b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
+                          AlertDialog.Builder(this@SettingsActivity)
+                              .setTitle("Доступно обновление v${info.versionCode}")
+                              .setMessage(info.changelog.take(400))
+                              .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
+                              .setNegativeButton("Позже", null)
+                              .show()
+                      }
                   }
               }
 
@@ -1177,7 +1299,7 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 6: PlayerActivity + коммит
+      # ШАГ 6: PlayerActivity (с фиксом фокуса)
       # ═══════════════════════════════════════════════════
       - name: "🎬 PlayerActivity + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -1241,6 +1363,30 @@ jobs:
                   val controller = WindowInsetsControllerCompat(window, window.decorView)
                   controller.hide(WindowInsetsCompat.Type.systemBars())
                   controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+                  // НАСТРОЙКА ФОКУСА МЕЖДУ КНОПКАМИ ПЛЕЕРА (чтобы пульт мог до них добраться)
+                  b.btnPlayPause.nextFocusUpId = R.id.btnSleepTimer
+                  b.btnPlayPause.nextFocusLeftId = R.id.btnBack
+                  b.btnPlayPause.nextFocusRightId = R.id.btnQuality
+
+                  b.btnSleepTimer.nextFocusDownId = R.id.btnPlayPause
+                  b.btnSleepTimer.nextFocusLeftId = R.id.btnBack
+                  b.btnSleepTimer.nextFocusRightId = R.id.btnQuality
+
+                  b.btnQuality.nextFocusDownId = R.id.btnAspect
+                  b.btnQuality.nextFocusLeftId = R.id.btnSleepTimer
+                  b.btnQuality.nextFocusUpId = R.id.btnPlayPause
+
+                  b.btnAspect.nextFocusUpId = R.id.btnQuality
+                  b.btnAspect.nextFocusLeftId = R.id.btnPlayPause
+
+                  b.btnBack.nextFocusDownId = R.id.btnPlayPause
+                  b.btnBack.nextFocusRightId = R.id.btnExitApp
+
+                  b.btnExitApp.nextFocusDownId = R.id.btnPlayPause
+                  b.btnExitApp.nextFocusLeftId = R.id.btnBack
+                  b.btnExitApp.nextFocusRightId = R.id.btnSleepTimer
+
                   names = intent.getStringArrayListExtra("names") ?: emptyList()
                   urls = intent.getStringArrayListExtra("urls") ?: emptyList()
                   currentIndex = intent.getIntExtra("index", 0)
@@ -1263,15 +1409,25 @@ jobs:
 
               private fun exitApp() {
                   handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
-                  finishAndRemoveTask(); android.os.Process.killProcess(android.os.Process.myPid())
+                  finishAffinity()
+                  android.os.Process.killProcess(android.os.Process.myPid())
               }
 
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                  // 1. Панель каналов открыта — BACK закрывает её и возвращает контролы
                   if (b.channelListPanel.visibility == View.VISIBLE) {
-                      if (event.keyCode == KeyEvent.KEYCODE_BACK) { b.channelListPanel.visibility = View.GONE; return true }
+                      if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                          b.channelListPanel.visibility = View.GONE
+                          showControls()
+                          return true
+                      }
                       return super.dispatchKeyEvent(event)
                   }
-                  if (b.controlsOverlay.visibility == View.VISIBLE) return super.dispatchKeyEvent(event)
+                  // 2. Контролы видны — пусть пульт работает по nextFocus*-Id
+                  if (b.controlsOverlay.visibility == View.VISIBLE) {
+                      return super.dispatchKeyEvent(event)
+                  }
+                  // 3. Обычный режим — зэппинг и открытие панели
                   if (event.action == KeyEvent.ACTION_DOWN) {
                       when (event.keyCode) {
                           KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_DPAD_RIGHT -> { switchChannel(-1); return true }
@@ -1429,7 +1585,9 @@ jobs:
                   b.rightControls.visibility = View.VISIBLE
                   b.btnSleepTimer.visibility = View.VISIBLE
                   b.leftControls.visibility = View.VISIBLE
-                  handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 4000)
+                  // ПРИНУДИТЕЛЬНО ставим фокус на центральную кнопку Play/Pause
+                  b.btnPlayPause.requestFocus()
+                  handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 5000)
               }
 
               override fun onDestroy() {
@@ -1443,7 +1601,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: settings screen with manual update check" || echo "no changes"
+          git commit -m "fix: exit via finishAffinity, proper player focus navigation" || echo "no changes"
           git push || echo "push failed"
 
       # ═══════════════════════════════════════════════════
@@ -1482,6 +1640,10 @@ jobs:
           name: TV Player v${{ github.run_number }}
           body: |
             ## Сборка #${{ github.run_number }}
+
+            🛠 Исправления:
+            - Кнопка "Выход из приложения" в настройках теперь действительно закрывает всё приложение (не возвращает в главное меню).
+            - В плеере кнопки (Качество, Вписать/Заполнить, Сон, Назад, Выход) теперь можно выбрать пультом.
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
