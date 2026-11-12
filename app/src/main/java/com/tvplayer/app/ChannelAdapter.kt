@@ -19,7 +19,6 @@ class ChannelAdapter(private val items: List<Channel>, private val onClick: (Cha
     override fun onBindViewHolder(h: VH, pos: Int) {
         val ch = items[pos]
         h.name.text = ch.name
-        
         if (ch.logo.isNotBlank()) {
             h.logo.load(ch.logo) {
                 crossfade(true)
@@ -29,7 +28,6 @@ class ChannelAdapter(private val items: List<Channel>, private val onClick: (Cha
         } else {
             h.logo.setImageResource(android.R.color.darker_gray)
         }
-        
         h.itemView.setOnClickListener { onClick(ch) }
     }
     override fun getItemCount() = items.size

@@ -1,13 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
     android:background="#000000">
-    <androidx.media3.ui.PlayerView android:id="@+id/playerView"
-        android:layout_width="match_parent" android:layout_height="match_parent"
+    
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/playerView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:controller_show_timeout_ms="2000"
+        app:show_buffering="when_playing"
+        app:use_controller="true"
+        app:resize_mode="zoom"
         android:keepScreenOn="true" />
-    <ProgressBar android:id="@+id/progress" android:layout_width="wrap_content"
-        android:layout_height="wrap_content" android:layout_gravity="center" />
-    <TextView android:id="@+id/error" android:layout_width="wrap_content"
-        android:layout_height="wrap_content" android:layout_gravity="center"
-        android:textColor="@color/text_dim" android:visibility="gone" />
+        
+    <TextView
+        android:id="@+id/btnQuality"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="24dp"
+        android:background="#AA000000"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="Auto"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:clickable="true"
+        android:focusable="true" />
+        
+    <ProgressBar
+        android:id="@+id/progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
+        
+    <TextView
+        android:id="@+id/error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:padding="24dp"
+        android:textColor="#FFAAAAAA"
+        android:visibility="gone" />
 </FrameLayout>

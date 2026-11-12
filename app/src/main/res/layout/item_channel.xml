@@ -10,7 +10,6 @@
     android:clickable="true"
     android:layout_marginBottom="4dp">
 
-    <!-- Квадратный логотип -->
     <ImageView
         android:id="@+id/logo"
         android:layout_width="80dp"
@@ -18,7 +17,6 @@
         android:scaleType="centerCrop"
         android:background="#222222" />
 
-    <!-- Только название, выровненное по центру -->
     <TextView
         android:id="@+id/name"
         android:layout_width="0dp"
