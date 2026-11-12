@@ -7,6 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
+import android.widget.ImageView
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -57,18 +59,39 @@ class PlayerActivity : AppCompatActivity() {
         controller.hide(WindowInsetsCompat.Type.systemBars())
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
-        // touchArea не должен забирать фокус
         b.touchArea.isFocusable = false
         b.touchArea.isFocusableInTouchMode = false
+
+        setupFocusHighlight()
 
         names = intent.getStringArrayListExtra("names") ?: emptyList()
         urls = intent.getStringArrayListExtra("urls") ?: emptyList()
         currentIndex = intent.getIntExtra("index", 0)
         startPlayback()
+
         b.btnBack.setOnClickListener { finish() }
         b.btnExitApp.setOnClickListener { exitApp() }
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
-        b.btnAspect.setOnClickListener { toggleAspect(); showControls() }
+        b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
+    }
+
+    // ═══════════ ПОДСВЕТКА ФОКУСА ═══════════
+    // Фон кнопок меняется через селектор (button_focus_bg.xml).
+    // Здесь мы меняем ЦВЕТ ТЕКСТА, чтобы он читался на белом фоне при фокусе.
+    private fun setupFocusHighlight() {
+        listOf(
+            b.btnQuality,
+            b.btnSleepTimer,
+            b.btnAspect,
+            b.btnBack,
+            b.btnExitApp
+        ).forEach { tv ->
+            tv.setOnFocusChangeListener { _, hasFocus ->
+                tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
+            }
+        }
+        // Для Play/Pause (ImageView) фон меняется сам через btn_play_pause_focus.xml,
+        // цвет иконки белый остаётся читаемым на синем и прозрачном фоне.
     }
 
     private fun toggleAspect() {
@@ -87,9 +110,7 @@ class PlayerActivity : AppCompatActivity() {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    // ============================================================
-    // РУЧНАЯ НАВИГАЦИЯ ФОКУСА (не полагаемся на nextFocus*Id)
-    // ============================================================
+    // ═══════════ РУЧНАЯ НАВИГАЦИЯ ═══════════
     private fun handleMenuNavigation(keyCode: Int): Boolean {
         val cur = currentFocus ?: run {
             b.btnPlayPause.requestFocus()
@@ -100,7 +121,7 @@ class PlayerActivity : AppCompatActivity() {
                 KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
                 KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
                 KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
-                KeyEvent.KEYCODE_DPAD_DOWN -> null
+                KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnQuality
                 else -> null
             }
             R.id.btnSleepTimer -> when (keyCode) {
@@ -142,7 +163,6 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // Панель каналов открыта
         if (b.channelListPanel.visibility == View.VISIBLE) {
             if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                 b.channelListPanel.visibility = View.GONE
@@ -152,7 +172,6 @@ class PlayerActivity : AppCompatActivity() {
             return super.dispatchKeyEvent(event)
         }
 
-        // Меню плеера показано — РУЧНАЯ обработка навигации
         if (b.controlsOverlay.visibility == View.VISIBLE) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 when (event.keyCode) {
@@ -168,18 +187,14 @@ class PlayerActivity : AppCompatActivity() {
                     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
                     KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         val handled = handleMenuNavigation(event.keyCode)
-                        if (handled) {
-                            resetHideTimeout()
-                            return true
-                        }
-                        return true  // даже если не переключилось — не пропускаем дальше
+                        if (handled) { resetHideTimeout(); return true }
+                        return true
                     }
                 }
             }
             return true
         }
 
-        // Меню скрыто — обычный режим
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { switchChannel(-1); return true }
@@ -268,13 +283,23 @@ class PlayerActivity : AppCompatActivity() {
         b.progress.visibility = View.GONE
         b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
         showControls()
-        b.btnQuality.setOnClickListener { showQualityDialog(); showControls() }
-        b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); showControls() }
+        b.btnQuality.setOnClickListener { showQualityDialog(); resetHideTimeout() }
+        b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
         b.btnPlayPause.setOnClickListener {
-            player?.let { p -> if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) } else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) } }
-            showControls()
+            player?.let { p ->
+                if (p.isPlaying) {
+                    p.pause()
+                    b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
+                } else {
+                    p.play()
+                    b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                }
+            }
+            resetHideTimeout()
         }
-        b.touchArea.setOnClickListener { if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls() }
+        b.touchArea.setOnClickListener {
+            if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls()
+        }
     }
 
     private fun updateQualityButton(tracks: Tracks) {
@@ -333,7 +358,7 @@ class PlayerActivity : AppCompatActivity() {
             }
             override fun onFinish() { exitApp() }
         }.start()
-        showControls()
+        resetHideTimeout()
     }
 
     private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }

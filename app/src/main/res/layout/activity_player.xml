@@ -4,17 +4,23 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
+
     <androidx.media3.ui.PlayerView
         android:id="@+id/playerView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:use_controller="false"
         app:resize_mode="zoom"
-        android:keepScreenOn="true" />
+        android:keepScreenOn="true"
+        android:focusable="false" />
+
     <View
         android:id="@+id/touchArea"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:focusable="false"
+        android:focusableInTouchMode="false" />
+
     <LinearLayout
         android:id="@+id/channelListPanel"
         android:layout_width="320dp"
@@ -37,6 +43,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
     </LinearLayout>
+
     <TextView
         android:id="@+id/channelNameOverlay"
         android:layout_width="wrap_content"
@@ -50,6 +57,7 @@
         android:textSize="24sp"
         android:textStyle="bold"
         android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/controlsOverlay"
         android:layout_width="match_parent"
@@ -63,10 +71,13 @@
             android:layout_width="96dp"
             android:layout_height="96dp"
             android:src="@android:drawable/ic_media_pause"
+            android:background="@drawable/btn_play_pause_focus"
+            android:padding="20dp"
             app:tint="#FFFFFF"
             android:clickable="true"
             android:focusable="true" />
     </LinearLayout>
+
     <LinearLayout
         android:id="@+id/leftControls"
         android:layout_width="wrap_content"
@@ -79,7 +90,7 @@
             android:id="@+id/btnBack"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="#AA000000"
+            android:background="@drawable/button_focus_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
             android:text="← В список"
@@ -93,23 +104,24 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:background="#AA000000"
+            android:background="@drawable/button_focus_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
             android:text="✕ Выход"
-            android:textColor="#FF8888"
+            android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:textStyle="bold"
             android:clickable="true"
             android:focusable="true" />
     </LinearLayout>
+
     <TextView
         android:id="@+id/btnSleepTimer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|center_horizontal"
         android:layout_margin="24dp"
-        android:background="#AA000000"
+        android:background="@drawable/button_focus_bg"
         android:paddingHorizontal="16dp"
         android:paddingVertical="8dp"
         android:text="Сон: Выкл"
@@ -119,6 +131,7 @@
         android:clickable="true"
         android:focusable="true"
         android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/rightControls"
         android:layout_width="wrap_content"
@@ -131,7 +144,7 @@
             android:id="@+id/btnQuality"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:background="#AA000000"
+            android:background="@drawable/button_focus_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
             android:text="Auto"
@@ -145,7 +158,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="#AA000000"
+            android:background="@drawable/button_focus_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
             android:text="Заполнить"
@@ -155,11 +168,13 @@
             android:clickable="true"
             android:focusable="true" />
     </LinearLayout>
+
     <ProgressBar
         android:id="@+id/progress"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center" />
+
     <LinearLayout
         android:id="@+id/errorLayout"
         android:layout_width="wrap_content"
