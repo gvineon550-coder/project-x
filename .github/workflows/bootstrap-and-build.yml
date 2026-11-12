@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+  schedule:
+    - cron: '0 3 * * 1'   # Каждый понедельник в 03:00 UTC
 
 permissions:
   contents: write
@@ -17,6 +19,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ═══════════════════════════════════════════════════
+      # ПРОВЕРКА: нужно ли собирать APK?
+      # (при плановом запуске — только если yt-dlp обновился)
+      # ═══════════════════════════════════════════════════
+      - name: "🔍 Проверка версии yt-dlp"
+        id: checkytdlp
+        run: |
+          LATEST=$(curl -s https://pypi.org/pypi/yt-dlp/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])")
+          LAST_BUILT=$(cat .last_ytdlp_version 2>/dev/null || echo "none")
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "PyPI (свежая):       $LATEST"
+          echo "Вшита в APK:         $LAST_BUILT"
+          echo "Триггер:             ${{ github.event_name }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$LATEST" = "$LAST_BUILT" ]; then
+            echo "ℹ️  Плановый запуск, yt-dlp не обновился — пропускаем сборку."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "$LATEST" > .last_ytdlp_version
+            echo "✅ Собираем новый APK"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -39,8 +64,8 @@ jobs:
       # ШАГ 1: Манифест, build.gradle (buildConfig), XML
       # ═══════════════════════════════════════════════════
       - name: "📦 Генерация манифеста и верстки"
+        if: steps.checkytdlp.outputs.skip != 'true'
         run: |
-          # Включаем buildConfig и добавляем repo в BuildConfig
           python3 - << 'PYEOF'
           import re
           path = "app/build.gradle"
@@ -455,6 +480,7 @@ jobs:
       # ШАГ 2: Python
       # ═══════════════════════════════════════════════════
       - name: "🐍 Python"
+        if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
           import yt_dlp
@@ -511,9 +537,10 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin Core (API, Cache, Adapters)
+      # ШАГ 3: Kotlin Core
       # ═══════════════════════════════════════════════════
       - name: "🧠 Kotlin Core"
+        if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
           package com.tvplayer.app
@@ -746,6 +773,7 @@ jobs:
       # ШАГ 4: MainActivity
       # ═══════════════════════════════════════════════════
       - name: "🧠 MainActivity (с OTA)"
+        if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
@@ -922,9 +950,10 @@ jobs:
           EOF
 
       # ═══════════════════════════════════════════════════
-      # ШАГ 5: PlayerActivity (с форматом экрана) + Сборка
+      # ШАГ 5: PlayerActivity + финальный коммит
       # ═══════════════════════════════════════════════════
-      - name: "🎬 Плеер + сборка"
+      - name: "🎬 Плеер + коммит"
+        if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
@@ -1187,10 +1216,14 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: OTA updates + aspect ratio toggle" || echo "no changes"
+          git commit -m "build: v$RUN_NUMBER (yt-dlp version saved)" || echo "no changes"
           git push || echo "push failed"
 
+      # ═══════════════════════════════════════════════════
+      # СБОРКА И РЕЛИЗ
+      # ═══════════════════════════════════════════════════
       - name: "🔨 Build APK"
+        if: steps.checkytdlp.outputs.skip != 'true'
         id: build
         run: |
           set +e
@@ -1203,6 +1236,7 @@ jobs:
           echo "✅ Gradle OK"
 
       - name: "📦 Prepare APK"
+        if: steps.checkytdlp.outputs.skip != 'true'
         id: apk
         run: |
           SRC=$(find app/build/outputs/apk/release -name "*.apk" -type f | head -1)
@@ -1214,15 +1248,16 @@ jobs:
           echo "file=$FILE" >> $GITHUB_OUTPUT
 
       - name: "🚀 Release"
+        if: steps.checkytdlp.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.apk.outputs.tag }}
           name: TV Player v${{ github.run_number }}
           body: |
-            ## Обновление #${{ github.run_number }}
-
-            Что нового в этой версии — в описании выше (в истории коммитов).
+            ## Сборка #${{ github.run_number }}
 
             📦 Скачайте APK ниже и установите поверх старой версии.
+
+            yt-dlp версия: **${{ steps.checkytdlp.outputs.skip == 'false' && 'обновлён' || 'без изменений' }}**
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
