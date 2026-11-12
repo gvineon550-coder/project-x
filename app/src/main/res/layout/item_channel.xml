@@ -1,14 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:orientation="vertical" android:padding="8dp"
-    android:focusable="true" android:focusableInTouchMode="true"
-    android:background="@drawable/tile_selector" android:clickable="true">
-    <ImageView android:id="@+id/logo" android:layout_width="match_parent"
-        android:layout_height="120dp" android:scaleType="centerCrop"
-        android:background="@color/tile_bg" />
-    <TextView android:id="@+id/name" android:layout_width="match_parent"
-        android:layout_height="wrap_content" android:paddingTop="6dp"
-        android:maxLines="2" android:ellipsize="end"
-        android:textColor="@color/text" android:textSize="14sp" />
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    android:background="@drawable/tile_selector"
+    android:clickable="true"
+    android:layout_marginBottom="4dp">
+
+    <!-- Квадратный логотип -->
+    <ImageView
+        android:id="@+id/logo"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:scaleType="centerCrop"
+        android:background="#222222" />
+
+    <!-- Только название, выровненное по центру -->
+    <TextView
+        android:id="@+id/name"
+        android:layout_width="0dp"
+        android:layout_height="80dp"
+        android:layout_weight="1"
+        android:paddingStart="16dp"
+        android:paddingEnd="8dp"
+        android:gravity="center_vertical"
+        android:textColor="@color/text"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:ellipsize="end" />
 </LinearLayout>

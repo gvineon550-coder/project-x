@@ -4,24 +4,27 @@ import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.tvplayer.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+
 class MainActivity : AppCompatActivity() {
     private lateinit var b: ActivityMainBinding
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
-        b.recycler.layoutManager = GridLayoutManager(this, 3)
+        b.recycler.layoutManager = LinearLayoutManager(this)
         b.btnRefresh.setOnClickListener { load() }
         b.btnExit.setOnClickListener { exitApp() }
         load()
     }
+
     private fun exitApp() {
         finishAndRemoveTask()
         android.os.Process.killProcess(android.os.Process.myPid())
     }
+
     private fun load() {
         b.progress.visibility = View.VISIBLE
         b.error.visibility = View.GONE
@@ -39,8 +42,12 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this@MainActivity, PlayerActivity::class.java)
                     .putExtra("url", ch.url).putExtra("name", ch.name))
             }
+            b.recycler.post {
+                b.recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
+            }
         }
     }
+
     private fun readConfig(): Pair<List<Channel>, String> {
         val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
         val o = JSONObject(json); val manual = mutableListOf<Channel>()
