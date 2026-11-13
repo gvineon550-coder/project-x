@@ -31,7 +31,7 @@ def resolve(url):
         if best: return best["url"]
         return info.get("url") or "ERROR: no m3u8 found"
     except Exception as e:
-        return "ERROR: " + str(e)
+        return "ERROR[" + type(e).__name__ + "]: " + str(e)
 def get_thumbnail(url):
     try:
         req = urllib.request.Request(url, headers=HEADERS)

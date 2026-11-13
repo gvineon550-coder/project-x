@@ -185,18 +185,36 @@
         android:visibility="gone"
         android:background="#DD000000"
         android:padding="24dp">
+
         <TextView
             android:id="@+id/errorText"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFAAAAAA"
-            android:textSize="16sp"
+            android:textSize="14sp"
+            android:lineSpacingExtra="3dp"
             android:gravity="center" />
+
+        <TextView
+            android:id="@+id/btnShowLog"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="#333333"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="10dp"
+            android:text="📋 Подробнее"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:clickable="true"
+            android:focusable="true" />
+
         <TextView
             android:id="@+id/btnRetry"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
             android:background="#333333"
             android:paddingHorizontal="24dp"
             android:paddingVertical="12dp"

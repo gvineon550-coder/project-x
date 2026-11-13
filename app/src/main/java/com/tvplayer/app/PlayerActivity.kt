@@ -1,5 +1,8 @@
 package com.tvplayer.app
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.os.CountDownTimer
@@ -7,8 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
-import android.widget.ImageView
-import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -73,25 +75,31 @@ class PlayerActivity : AppCompatActivity() {
         b.btnExitApp.setOnClickListener { exitApp() }
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
         b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
+
+        // Кнопка "Подробнее" в диалоге ошибки
+        b.btnShowLog.setOnClickListener { showLogDialog() }
     }
 
-    // ═══════════ ПОДСВЕТКА ФОКУСА ═══════════
-    // Фон кнопок меняется через селектор (button_focus_bg.xml).
-    // Здесь мы меняем ЦВЕТ ТЕКСТА, чтобы он читался на белом фоне при фокусе.
+    private fun showLogDialog() {
+        val log = CrashLogger.readAll(this)
+        AlertDialog.Builder(this)
+            .setTitle("Лог приложения")
+            .setMessage(log.takeLast(3000))
+            .setPositiveButton("Скопировать") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Закрыть", null)
+            .show()
+    }
+
     private fun setupFocusHighlight() {
-        listOf(
-            b.btnQuality,
-            b.btnSleepTimer,
-            b.btnAspect,
-            b.btnBack,
-            b.btnExitApp
-        ).forEach { tv ->
+        listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->
             tv.setOnFocusChangeListener { _, hasFocus ->
                 tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
             }
         }
-        // Для Play/Pause (ImageView) фон меняется сам через btn_play_pause_focus.xml,
-        // цвет иконки белый остаётся читаемым на синем и прозрачном фоне.
     }
 
     private fun toggleAspect() {
@@ -102,6 +110,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         b.playerView.resizeMode = currentResizeMode
         b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
+        CrashLogger.info("Player", "Формат изменён на: ${b.btnAspect.text}")
     }
 
     private fun exitApp() {
@@ -110,12 +119,8 @@ class PlayerActivity : AppCompatActivity() {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    // ═══════════ РУЧНАЯ НАВИГАЦИЯ ═══════════
     private fun handleMenuNavigation(keyCode: Int): Boolean {
-        val cur = currentFocus ?: run {
-            b.btnPlayPause.requestFocus()
-            return true
-        }
+        val cur = currentFocus ?: run { b.btnPlayPause.requestFocus(); return true }
         val nextId: Int? = when (cur.id) {
             R.id.btnPlayPause -> when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
@@ -171,14 +176,10 @@ class PlayerActivity : AppCompatActivity() {
             }
             return super.dispatchKeyEvent(event)
         }
-
         if (b.controlsOverlay.visibility == View.VISIBLE) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 when (event.keyCode) {
-                    KeyEvent.KEYCODE_BACK -> {
-                        hideControlsRunnable.run()
-                        return true
-                    }
+                    KeyEvent.KEYCODE_BACK -> { hideControlsRunnable.run(); return true }
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                         (currentFocus as? View)?.performClick()
                         resetHideTimeout()
@@ -194,13 +195,12 @@ class PlayerActivity : AppCompatActivity() {
             }
             return true
         }
-
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { switchChannel(-1); return true }
                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { switchChannel(1); return true }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { showChannelList(); return true }
-                KeyEvent.KEYCODE_BACK -> { exitApp(); return true }
+                KeyEvent.KEYCODE_BACK -> { finish(); return true }
             }
         }
         return super.dispatchKeyEvent(event)
@@ -237,6 +237,7 @@ class PlayerActivity : AppCompatActivity() {
         getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
         val chNum = currentIndex + 1
         val chName = names.getOrNull(currentIndex) ?: "Канал"
+        CrashLogger.info("Player", "Открытие канала #$chNum: $chName")
         b.channelNameOverlay.text = "$chNum. $chName"
         b.channelNameOverlay.visibility = View.VISIBLE
         handler.removeCallbacks(hideChannelOverlayRunnable)
@@ -245,16 +246,25 @@ class PlayerActivity : AppCompatActivity() {
         retryCount = 0
         val channelUrl = urls.getOrNull(currentIndex) ?: return
         val cached = StreamCache.get(this, channelUrl)
-        if (cached != null) { play(cached); return }
+        if (cached != null) {
+            CrashLogger.info("Player", "Использую кэш ссылки")
+            play(cached)
+            return
+        }
         if (!NetworkUtils.isOnline(this)) {
             b.progress.visibility = View.GONE
-            b.errorText.text = "Нет подключения к интернету."
-            b.errorLayout.visibility = View.VISIBLE; return
+            b.errorText.text = "Нет подключения к интернету.\n\nПроверьте Wi-Fi или кабель и нажмите «Повторить»."
+            b.errorLayout.visibility = View.VISIBLE
+            CrashLogger.info("Player", "Нет интернета при открытии канала")
+            return
         }
         b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val direct = StreamResolver.resolve(channelUrl)
-            if (direct.startsWith("ERROR:")) { handleError(); return@launch }
+            if (direct.startsWith("ERROR")) {
+                handleError(direct)
+                return@launch
+            }
             StreamCache.put(this@PlayerActivity, channelUrl, direct)
             play(direct)
         }
@@ -271,11 +281,15 @@ class PlayerActivity : AppCompatActivity() {
             setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
             playWhenReady = true; prepare()
             addListener(object : Player.Listener {
-                override fun onTracksChanged(tracks: Tracks) { updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE }
+                override fun onTracksChanged(tracks: Tracks) {
+                    updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE
+                    CrashLogger.info("Player", "Воспроизведение началось")
+                }
                 override fun onPlayerError(error: PlaybackException) {
                     super.onPlayerError(error)
+                    CrashLogger.error("Player", "Ошибка воспроизведения: ${error.errorCodeName} (${error.errorCode}) — ${error.message}")
                     urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
-                    handleError()
+                    handleError("Ошибка плеера: ${error.errorCodeName}\n${error.message?.take(200) ?: ""}")
                 }
             })
         }
@@ -287,13 +301,8 @@ class PlayerActivity : AppCompatActivity() {
         b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
         b.btnPlayPause.setOnClickListener {
             player?.let { p ->
-                if (p.isPlaying) {
-                    p.pause()
-                    b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
-                } else {
-                    p.play()
-                    b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-                }
+                if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) }
+                else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) }
             }
             resetHideTimeout()
         }
@@ -309,6 +318,7 @@ class PlayerActivity : AppCompatActivity() {
         val height = if (format.height > 0) "${format.height}p" else "Auto"
         val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
         b.btnQuality.text = height + bitrate
+        CrashLogger.info("Player", "Качество: $height${bitrate}")
     }
 
     private fun showQualityDialog() {
@@ -331,32 +341,47 @@ class PlayerActivity : AppCompatActivity() {
         }.show()
     }
 
-    private fun handleError() {
+    private fun handleError(errorText: String? = null) {
         if (retryCount < MAX_RETRIES) {
-            retryCount++; b.progress.visibility = View.VISIBLE; handler.postDelayed({ startPlayback() }, RETRY_DELAY)
+            retryCount++
+            b.progress.visibility = View.VISIBLE
+            CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES через ${RETRY_DELAY}мс")
+            handler.postDelayed({ startPlayback() }, RETRY_DELAY)
         } else {
             b.progress.visibility = View.GONE
-            b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
-            b.errorLayout.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE
-            b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
+            val details = errorText ?: "Неизвестная ошибка"
+            b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"
+            b.errorLayout.visibility = View.VISIBLE
+            b.controlsOverlay.visibility = View.GONE
+            b.rightControls.visibility = View.GONE
+            b.btnSleepTimer.visibility = View.GONE
+            b.leftControls.visibility = View.GONE
+            CrashLogger.error("Player", "Все $MAX_RETRIES попыток исчерпаны")
         }
     }
 
     private fun showSleepTimerDialog() {
         val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
         val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
-        AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which -> val mins = minutes[which]; if (mins == 0) cancelSleepTimer() else startSleepTimer(mins) }.show()
+        AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which ->
+            val mins = minutes[which]
+            if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
+        }.show()
     }
 
     private fun startSleepTimer(minutes: Int) {
         sleepTimer?.cancel()
+        CrashLogger.info("Player", "Таймер сна установлен на $minutes минут")
         val millis = minutes * 60 * 1000L
         sleepTimer = object : CountDownTimer(millis, 1000) {
             override fun onTick(millisUntilFinished: Long) {
                 val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60
                 b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
             }
-            override fun onFinish() { exitApp() }
+            override fun onFinish() {
+                CrashLogger.info("Player", "Таймер сна сработал — выключаюсь")
+                exitApp()
+            }
         }.start()
         resetHideTimeout()
     }
@@ -373,6 +398,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy(); handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
+        super.onDestroy()
+        CrashLogger.info("Player", "Закрытие плеера")
+        handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
     }
 }

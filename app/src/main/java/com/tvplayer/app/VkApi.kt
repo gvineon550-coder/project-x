@@ -6,12 +6,17 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+
 data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
+
 private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
 private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
     withContext(Dispatchers.IO) {
         val result = mutableListOf<Channel>()
+        val startTime = System.currentTimeMillis()
+        CrashLogger.info("VkApi", "→ Загрузка каналов, category=$categoryId")
         try {
             val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
             val req = Request.Builder().url(url)
@@ -20,6 +25,7 @@ suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channe
                 .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
+                CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер ответа: ${body.length} байт")
                 if (resp.isSuccessful && body.isNotBlank()) {
                     val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
                     if (streams != null) for (i in 0 until streams.length()) {
@@ -32,8 +38,14 @@ suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channe
                         val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null } ?: blog.optString("coverUrl")
                         result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
                     }
+                } else {
+                    CrashLogger.error("VkApi", "Неуспешный ответ HTTP ${resp.code}")
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            CrashLogger.error("VkApi", "Ошибка загрузки каналов", e)
+        }
+        val elapsed = System.currentTimeMillis() - startTime
+        CrashLogger.info("VkApi", "✓ Загружено ${result.size} каналов за ${elapsed}мс (+ ${manual.size} ручных)")
         result + manual
     }

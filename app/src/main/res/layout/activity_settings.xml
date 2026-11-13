@@ -125,6 +125,32 @@
                     android:padding="16dp"
                     android:focusable="true"
                     android:clickable="true"
+                    android:background="@drawable/tile_selector"
+                    android:layout_marginBottom="8dp" />
+                <TextView
+                    android:id="@+id/btnOpenLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📋 Открыть лог"
+                    android:textColor="@color/text"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:padding="16dp"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:background="@drawable/tile_selector"
+                    android:layout_marginBottom="8dp" />
+                <TextView
+                    android:id="@+id/btnShareLog"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="📤 Отправить лог"
+                    android:textColor="@color/text"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:padding="16dp"
+                    android:focusable="true"
+                    android:clickable="true"
                     android:background="@drawable/tile_selector" />
             </LinearLayout>
 

@@ -1,5 +1,8 @@
 package com.tvplayer.app
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -26,6 +29,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var showOnlyFavorites = false
     private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
     private var backPressedTime: Long = 0
+    private var needScrollOnResume = false
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
@@ -39,16 +43,20 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
         autoCleanCache()
-        b.btnRefresh.setOnClickListener { load() }
-        b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+        b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+        b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
         b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnFavFilter.nextFocusDownId = R.id.recycler
         b.btnRefresh.nextFocusDownId = R.id.recycler
         b.btnSettings.nextFocusDownId = R.id.recycler
 
+        // Клик по ошибке = показать полный лог
+        b.error.setOnClickListener { showLogDialog() }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (System.currentTimeMillis() - backPressedTime < 2000) {
+                if (System.currentTimeMillis() - backPressedTime < 3000) {
+                    CrashLogger.info("Lifecycle", "Полный выход из приложения (двойной BACK)")
                     exitApp()
                 } else {
                     Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
@@ -57,8 +65,104 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             }
         })
 
-        load()
+        loadInitial()
         checkForUpdates()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (needScrollOnResume && allChannels.isNotEmpty()) {
+            needScrollOnResume = false
+            b.recycler.postDelayed({ scrollToLastChannel() }, 200)
+        }
+    }
+
+    private fun scrollToLastChannel() {
+        val lastIndex = prefs.getInt("last_channel", 0)
+        if (lastIndex in allChannels.indices) {
+            (b.recycler.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(lastIndex, 0)
+            b.recycler.postDelayed({
+                b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus()
+            }, 100)
+        }
+    }
+
+    private fun loadInitial() {
+        val cached = ChannelCache.load(this)
+        if (cached != null && cached.isNotEmpty()) {
+            allChannels = cached
+            updateView(scrollToLast = true)
+            if (ChannelCache.isFresh(this)) {
+                CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем")
+                return
+            }
+            CrashLogger.info("MainActivity", "Кэш устарел — обновление в фоне")
+            loadFromNetwork(forceRefresh = false)
+        } else {
+            CrashLogger.info("MainActivity", "Кэш пуст — полная загрузка")
+            b.progress.visibility = View.VISIBLE
+            loadFromNetwork(forceRefresh = false)
+        }
+    }
+
+    private fun loadFromNetwork(forceRefresh: Boolean) {
+        if (!NetworkUtils.isOnline(this)) {
+            CrashLogger.info("MainActivity", "Нет интернета — загрузка отменена")
+            if (allChannels.isEmpty()) {
+                b.progress.visibility = View.GONE
+                b.recycler.visibility = View.GONE
+                b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
+                b.error.visibility = View.VISIBLE
+            }
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val (manual, cat) = readConfig()
+                val manualWithLogos = manual.map { ch ->
+                    if (ch.logo.isBlank()) {
+                        val thumb = StreamResolver.getThumbnail(ch.url)
+                        if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                    } else ch
+                }
+                val fresh = loadChannels(cat, manualWithLogos)
+                b.progress.visibility = View.GONE
+                if (fresh.isNotEmpty()) {
+                    val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
+                    allChannels = fresh
+                    ChannelCache.save(this@MainActivity, fresh)
+                    if (changed || forceRefresh || b.recycler.adapter == null) {
+                        updateView(scrollToLast = forceRefresh)
+                    }
+                } else {
+                    val msg = "Не удалось загрузить каналы\n\nВозможно:\n• VK API вернул пустой список\n• Категория изменилась\n\nНажмите для подробностей."
+                    b.error.text = msg
+                    b.error.visibility = View.VISIBLE
+                    CrashLogger.error("MainActivity", "Пустой список каналов после загрузки")
+                }
+            } catch (e: Exception) {
+                b.progress.visibility = View.GONE
+                val msg = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}\n\nНажмите для подробностей."
+                b.error.text = msg
+                b.error.visibility = View.VISIBLE
+                CrashLogger.error("MainActivity", "Исключение при загрузке", e)
+            }
+        }
+    }
+
+    private fun showLogDialog() {
+        val log = CrashLogger.readAll(this)
+        AlertDialog.Builder(this)
+            .setTitle("Лог приложения")
+            .setMessage(log.takeLast(3000))
+            .setPositiveButton("Отправить") { _, _ -> CrashLogger.share(this) }
+            .setNegativeButton("Скопировать") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("Закрыть", null)
+            .show()
     }
 
     private fun autoCleanCache() {
@@ -66,6 +170,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
         if (totalSize > 15 * 1024 * 1024) {
             cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+            CrashLogger.info("MainActivity", "Автоочистка кэша картинок")
         }
     }
 
@@ -101,10 +206,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private fun installApk(file: File) {
         if (!packageManager.canRequestPackageInstalls()) {
             Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
+            CrashLogger.info("OTA", "Нет разрешения на установку — открываем настройки")
             try {
                 val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
                 startActivity(intent)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                CrashLogger.error("OTA", "Не удалось открыть настройки", e)
+            }
             return
         }
         try {
@@ -114,37 +222,17 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
+            CrashLogger.info("OTA", "Запущена установка APK")
         } catch (e: Exception) {
+            CrashLogger.error("OTA", "Ошибка установки APK", e)
             Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun load() {
-        if (!NetworkUtils.isOnline(this)) {
-            b.progress.visibility = View.GONE; b.recycler.visibility = View.GONE
-            b.error.text = "Нет подключения к интернету."
-            b.error.visibility = View.VISIBLE; return
-        }
-        b.progress.visibility = View.VISIBLE; b.error.visibility = View.GONE; b.recycler.visibility = View.GONE
-        lifecycleScope.launch {
-            val (manual, cat) = readConfig()
-            val manualWithLogos = manual.map { ch ->
-                if (ch.logo.isBlank()) {
-                    val thumb = StreamResolver.getThumbnail(ch.url)
-                    if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
-                } else ch
-            }
-            allChannels = loadChannels(cat, manualWithLogos)
-            b.progress.visibility = View.GONE
-            if (allChannels.isEmpty()) {
-                b.error.text = "Не удалось загрузить список."
-                b.error.visibility = View.VISIBLE; return@launch
-            }
-            updateView()
-        }
-    }
-
-    private fun updateView() {
+    private fun updateView(scrollToLast: Boolean = false) {
+        if (allChannels.isEmpty()) return
+        b.progress.visibility = View.GONE
+        b.error.visibility = View.GONE
         val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
         allChannels.forEach { it.isFavorite = favs.contains(it.url) }
         val sorted = allChannels.sortedByDescending { it.isFavorite }
@@ -153,6 +241,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
         b.recycler.visibility = View.VISIBLE
         b.recycler.adapter = ChannelAdapter(displayed, { ch ->
+            needScrollOnResume = true
+            CrashLogger.info("UI", "Открытие канала: ${ch.name}")
             val intent = Intent(this@MainActivity, PlayerActivity::class.java)
             intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
             intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))
@@ -162,9 +252,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
             if (currentFavs.contains(ch.url)) currentFavs.remove(ch.url) else currentFavs.add(ch.url)
             prefs.edit().putStringSet("favorites", currentFavs).apply()
-            updateView()
+            updateView(scrollToLast = false)
         })
-        b.recycler.post { b.recycler.getChildAt(0)?.requestFocus() }
+
+        b.recycler.post {
+            if (scrollToLast) scrollToLastChannel()
+            else b.recycler.getChildAt(0)?.requestFocus()
+        }
     }
 
     private fun readConfig(): Pair<List<Channel>, String> {

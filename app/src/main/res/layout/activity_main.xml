@@ -76,11 +76,18 @@
         app:layout_constraintBottom_toBottomOf="@id/recycler"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+    <!-- Ошибка: теперь кликабельная (для просмотра подробностей) -->
     <TextView
         android:id="@+id/error"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:textColor="@color/text_dim"
+        android:padding="24dp"
+        android:gravity="center"
+        android:textColor="#FFFF6B6B"
+        android:textSize="14sp"
+        android:lineSpacingExtra="3dp"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/recycler"
         app:layout_constraintBottom_toBottomOf="@id/recycler"

@@ -1,5 +1,8 @@
 package com.tvplayer.app
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -35,6 +38,7 @@ class SettingsActivity : AppCompatActivity() {
             • Таймер сна (от 5 минут до 5 часов)
             • Авто-обновление приложения
             • Умное кэширование ссылок и очистка кэша
+            • Подробный лог всех операций
             
             ⚙️ ТЕХНОЛОГИИ:
             • Резолвер: yt-dlp (Python + Chaquopy)
@@ -57,12 +61,33 @@ class SettingsActivity : AppCompatActivity() {
             imageLoader.diskCache?.clear()
             imageLoader.memoryCache?.clear()
             StreamCache.clearAll(this)
+            ChannelCache.clear(this)
             cacheDir.listFiles()?.forEach { it.deleteRecursively() }
             Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
             updateCacheInfo()
+            CrashLogger.info("Settings", "Кэш очищен вручную")
+        }
+
+        b.btnOpenLog.setOnClickListener {
+            val log = CrashLogger.readAll(this)
+            AlertDialog.Builder(this)
+                .setTitle("Лог приложения")
+                .setMessage(log.takeLast(3000))
+                .setPositiveButton("Скопировать") { _, _ ->
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                    Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Закрыть", null)
+                .show()
+        }
+
+        b.btnShareLog.setOnClickListener {
+            CrashLogger.share(this)
         }
 
         b.btnExitApp.setOnClickListener {
+            CrashLogger.info("Settings", "Полный выход из настроек")
             finishAffinity()
             android.os.Process.killProcess(android.os.Process.myPid())
         }
@@ -126,6 +151,7 @@ class SettingsActivity : AppCompatActivity() {
             }
             startActivity(intent)
         } catch (e: Exception) {
+            CrashLogger.error("OTA", "Ошибка установки", e)
             Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
