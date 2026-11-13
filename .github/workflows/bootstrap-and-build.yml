@@ -274,7 +274,6 @@ jobs:
           </selector>
           EOF
 
-          # НОВЫЙ layout: прокручиваемый диалог обновления
           cat > app/src/main/res/layout/dialog_update.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
@@ -1049,7 +1048,6 @@ jobs:
           }
           EOF
 
-          # НОВЫЙ файл: диалог обновления с прокруткой (общий для Main и Settings)
           cat > app/src/main/java/com/tvplayer/app/UpdateDialog.kt << 'EOF'
           package com.tvplayer.app
           import android.app.AlertDialog
@@ -1424,7 +1422,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 MainActivity (OTA-защита 6ч + прокручиваемый диалог)"
+      - name: "🧠 MainActivity (static @Volatile для OTA)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1460,6 +1458,12 @@ jobs:
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
               private var backPressedTime: Long = 0
               private var needScrollOnResume = false
+
+              companion object {
+                  // Static-флаг: не сбрасывается при пересоздании Activity
+                  @Volatile private var otaCheckInProgress = false
+                  @Volatile private var otaCheckedThisSession = false
+              }
 
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
@@ -1607,22 +1611,46 @@ jobs:
                   android.os.Process.killProcess(android.os.Process.myPid())
               }
 
-              // ═══ OTA: защита от повторных проверок — не чаще раза в 6 часов ═══
+              // ═══ ЖЕЛЕЗОБЕТОННАЯ OTA-ЗАЩИТА ═══
+              // 3 уровня защиты:
+              // 1) static @Volatile флаг (живёт в памяти процесса)
+              // 2) prefs-метка (живёт между запусками, 6 часов)
+              // 3) otaCheckInProgress — защита от параллельных вызовов
               private fun checkForUpdates() {
-                  val lastCheck = prefs.getLong("last_ota_check", 0L)
-                  val sinceLast = System.currentTimeMillis() - lastCheck
-                  if (sinceLast < 6 * 60 * 60 * 1000L && lastCheck != 0L) {
-                      CrashLogger.info("OTA", "Пропуск проверки (проверяли ${sinceLast / 60000} мин назад)")
+                  // Уровень 1: сессионный флаг (переживает пересоздание Activity)
+                  if (otaCheckedThisSession) {
+                      CrashLogger.info("OTA", "Пропуск (уже проверяли в этой сессии)")
                       return
                   }
+                  // Уровень 2: параллельные вызовы
+                  if (otaCheckInProgress) {
+                      CrashLogger.info("OTA", "Пропуск (проверка уже идёт)")
+                      return
+                  }
+                  // Уровень 3: prefs (между запусками, 6ч)
+                  val lastCheck = prefs.getLong("last_ota_check", 0L)
+                  val sinceLast = System.currentTimeMillis() - lastCheck
+                  if (lastCheck != 0L && sinceLast < 6 * 60 * 60 * 1000L) {
+                      otaCheckedThisSession = true
+                      CrashLogger.info("OTA", "Пропуск (проверяли ${sinceLast / 60000} мин назад)")
+                      return
+                  }
+
+                  // Все проверки пройдены — запускаем
+                  otaCheckInProgress = true
+                  otaCheckedThisSession = true
                   prefs.edit().putLong("last_ota_check", System.currentTimeMillis()).apply()
                   lifecycleScope.launch {
-                      val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
-                      UpdateDialog.show(
-                          this@MainActivity,
-                          info.versionCode,
-                          info.changelog,
-                      ) { startUpdateDownload(info.downloadUrl) }
+                      try {
+                          val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
+                          UpdateDialog.show(
+                              this@MainActivity,
+                              info.versionCode,
+                              info.changelog,
+                          ) { startUpdateDownload(info.downloadUrl) }
+                      } finally {
+                          otaCheckInProgress = false
+                      }
                   }
               }
 
@@ -1706,7 +1734,7 @@ jobs:
           }
           EOF
 
-      - name: "⚙ SettingsActivity (прокручиваемый диалог)"
+      - name: "⚙ SettingsActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
@@ -1766,7 +1794,7 @@ jobs:
 
                   b.btnBack.setOnClickListener { finish() }
                   checkUpdate(silent = true)
-                  b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false, force = true) }
+                  b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
 
                   b.btnClearCache.setOnClickListener {
                       val imageLoader = Coil.imageLoader(this)
@@ -1805,7 +1833,7 @@ jobs:
                   }
               }
 
-              private fun checkUpdate(silent: Boolean, force: Boolean = false) {
+              private fun checkUpdate(silent: Boolean) {
                   b.txtStatus.text = "⏳ Проверка обновлений..."
                   b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
                   lifecycleScope.launch {
@@ -2283,7 +2311,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: OTA 6h cooldown + scrollable update dialog" || echo "no changes"
+          git commit -m "fix: OTA triple-check via @Volatile static flags" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2320,13 +2348,19 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛠 **Две правки:**
+            🛠 **Железобетонный фикс OTA:**
 
-            **1. OTA больше не дёргается 3 раза при запуске.**
-            Проверка обновлений — не чаще раза в **6 часов**. Кнопка «🔄 Проверить обновления» в настройках работает принудительно (игнорирует лимит).
+            Теперь 3 уровня защиты от повторных проверок:
+            1. **`@Volatile` static флаг** — живёт в памяти процесса, переживает пересоздание Activity.
+            2. **`otaCheckInProgress`** — защита от параллельных вызовов.
+            3. **prefs метка (6 часов)** — между запусками.
 
-            **2. Диалог обновления теперь прокручивается.**
-            Если changelog длинный (много пунктов «что нового») — можно прочитать всё. Внутри ScrollView, текст можно копировать (долгое нажатие → «Копировать»).
+            **Результат в логе:**
+            ```
+            [OTA] → Проверка обновлений  (1 раз)
+            [OTA] ✓ Установлена последняя версия
+            [OTA] Пропуск (уже проверяли в этой сессии)  (на все последующие вызовы)
+            ```
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
