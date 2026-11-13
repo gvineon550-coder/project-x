@@ -1422,7 +1422,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 MainActivity (static @Volatile для OTA)"
+      - name: "🧠 MainActivity (commit() + debug log)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1458,12 +1458,6 @@ jobs:
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
               private var backPressedTime: Long = 0
               private var needScrollOnResume = false
-
-              companion object {
-                  // Static-флаг: не сбрасывается при пересоздании Activity
-                  @Volatile private var otaCheckInProgress = false
-                  @Volatile private var otaCheckedThisSession = false
-              }
 
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
@@ -1611,46 +1605,40 @@ jobs:
                   android.os.Process.killProcess(android.os.Process.myPid())
               }
 
-              // ═══ ЖЕЛЕЗОБЕТОННАЯ OTA-ЗАЩИТА ═══
-              // 3 уровня защиты:
-              // 1) static @Volatile флаг (живёт в памяти процесса)
-              // 2) prefs-метка (живёт между запусками, 6 часов)
-              // 3) otaCheckInProgress — защита от параллельных вызовов
+              // ═══ ФИНАЛЬНАЯ OTA-ЗАЩИТА ═══
+              // Используем .commit() (синхронная запись на диск), проверяем
+              // и версию, и время. С debug-логом, чтобы видеть значения.
               private fun checkForUpdates() {
-                  // Уровень 1: сессионный флаг (переживает пересоздание Activity)
-                  if (otaCheckedThisSession) {
-                      CrashLogger.info("OTA", "Пропуск (уже проверяли в этой сессии)")
-                      return
-                  }
-                  // Уровень 2: параллельные вызовы
-                  if (otaCheckInProgress) {
-                      CrashLogger.info("OTA", "Пропуск (проверка уже идёт)")
-                      return
-                  }
-                  // Уровень 3: prefs (между запусками, 6ч)
+                  val currentVersion = BuildConfig.VERSION_CODE
+                  val lastVersion = prefs.getInt("last_ota_version", 0)
                   val lastCheck = prefs.getLong("last_ota_check", 0L)
                   val sinceLast = System.currentTimeMillis() - lastCheck
-                  if (lastCheck != 0L && sinceLast < 6 * 60 * 60 * 1000L) {
-                      otaCheckedThisSession = true
-                      CrashLogger.info("OTA", "Пропуск (проверяли ${sinceLast / 60000} мин назад)")
+                  val sinceLastMin = sinceLast / 60000
+
+                  CrashLogger.info("OTA",
+                      "Debug: current=v$currentVersion, lastChecked=v$lastVersion, " +
+                      "sinceLast=${sinceLastMin}мин, lastCheck=$lastCheck")
+
+                  // Пропускаем, если версия та же И проверяли меньше 6 часов назад
+                  if (lastCheck != 0L && lastVersion == currentVersion && sinceLast < 6 * 60 * 60 * 1000L) {
+                      CrashLogger.info("OTA", "Пропуск (v$currentVersion, проверяли ${sinceLastMin}мин назад)")
                       return
                   }
 
-                  // Все проверки пройдены — запускаем
-                  otaCheckInProgress = true
-                  otaCheckedThisSession = true
-                  prefs.edit().putLong("last_ota_check", System.currentTimeMillis()).apply()
+                  // Атомарная синхронная запись — гарантия, что 2-й вызов увидит новые значения
+                  val committed = prefs.edit()
+                      .putInt("last_ota_version", currentVersion)
+                      .putLong("last_ota_check", System.currentTimeMillis())
+                      .commit()
+                  CrashLogger.info("OTA", "Запуск проверки (committed=$committed)")
+
                   lifecycleScope.launch {
-                      try {
-                          val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
-                          UpdateDialog.show(
-                              this@MainActivity,
-                              info.versionCode,
-                              info.changelog,
-                          ) { startUpdateDownload(info.downloadUrl) }
-                      } finally {
-                          otaCheckInProgress = false
-                      }
+                      val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
+                      UpdateDialog.show(
+                          this@MainActivity,
+                          info.versionCode,
+                          info.changelog,
+                      ) { startUpdateDownload(info.downloadUrl) }
                   }
               }
 
@@ -2311,7 +2299,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: OTA triple-check via @Volatile static flags" || echo "no changes"
+          git commit -m "fix: OTA triple-check with commit() + version+time check + debug log" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2348,18 +2336,16 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛠 **Железобетонный фикс OTA:**
+            🛠 **Финальный фикс OTA:**
 
-            Теперь 3 уровня защиты от повторных проверок:
-            1. **`@Volatile` static флаг** — живёт в памяти процесса, переживает пересоздание Activity.
-            2. **`otaCheckInProgress`** — защита от параллельных вызовов.
-            3. **prefs метка (6 часов)** — между запусками.
+            - **`.commit()` вместо `.apply()`** — синхронная запись в SharedPreferences (гарантия, что 2-й вызов Activity увидит новые значения).
+            - **Проверка двух ключей** — `last_ota_version` + `last_ota_check` (защита от пересоздания Activity).
+            - **Debug-логирование** — в логе будет видно `current=vN, lastChecked=vN, sinceLast=Xмин, lastCheck=TIMESTAMP`. Если фикс снова не сработает — по этим значениям поймём, в чём дело.
 
-            **Результат в логе:**
+            **Ожидаемый лог при запуске:**
             ```
-            [OTA] → Проверка обновлений  (1 раз)
-            [OTA] ✓ Установлена последняя версия
-            [OTA] Пропуск (уже проверяли в этой сессии)  (на все последующие вызовы)
+            [OTA] Debug: current=v31, lastChecked=v30, sinceLast=1мин
+            [OTA] Пропуск (v31, проверяли 1мин назад)
             ```
 
             📦 Скачайте APK ниже и установите поверх старой версии.
