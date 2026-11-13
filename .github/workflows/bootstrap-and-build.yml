@@ -49,10 +49,7 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 1: Манифест, build.gradle, XML, иконки, сплэш
-      # ═══════════════════════════════════════════════════
-      - name: "📦 Манифест, иконки, сплэш, фоны кнопок"
+      - name: "📦 Манифест, иконки, сплэш, фоны"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           pip install --quiet Pillow
@@ -148,6 +145,7 @@ jobs:
           </resources>
           EOF
 
+          # КРИТИЧНО: заменяем PyApplication на наш TVPlayerApp (для инициализации логгера)
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -164,7 +162,7 @@ jobs:
                   android:icon="@mipmap/ic_launcher"
                   android:roundIcon="@mipmap/ic_launcher_round"
                   android:label="@string/app_name"
-                  android:name="com.chaquo.python.android.PyApplication"
+                  android:name=".TVPlayerApp"
                   android:networkSecurityConfig="@xml/network_security_config"
                   android:usesCleartextTraffic="true"
                   android:theme="@style/Theme.TVPlayer">
@@ -200,12 +198,10 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <paths>
               <cache-path name="cache" path="." />
+              <files-path name="files" path="." />
           </paths>
           EOF
 
-          # ═══ ФОНЫ КНОПОК С ПОДСВЕТКОЙ ПРИ ФОКУСЕ ═══
-
-          # Для текстовых кнопок: чёрный → белый + синяя обводка
           cat > app/src/main/res/drawable/button_focus_bg.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <selector xmlns:android="http://schemas.android.com/apk/res/android">
@@ -225,7 +221,6 @@ jobs:
           </selector>
           EOF
 
-          # Для Play/Pause: чёрный → синий (белая иконка остаётся видимой)
           cat > app/src/main/res/drawable/btn_play_pause_focus.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <selector xmlns:android="http://schemas.android.com/apk/res/android">
@@ -410,11 +405,18 @@ jobs:
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
+              <!-- Ошибка: теперь кликабельная (для просмотра подробностей) -->
               <TextView
                   android:id="@+id/error"
-                  android:layout_width="wrap_content"
+                  android:layout_width="0dp"
                   android:layout_height="wrap_content"
-                  android:textColor="@color/text_dim"
+                  android:padding="24dp"
+                  android:gravity="center"
+                  android:textColor="#FFFF6B6B"
+                  android:textSize="14sp"
+                  android:lineSpacingExtra="3dp"
+                  android:clickable="true"
+                  android:focusable="true"
                   android:visibility="gone"
                   app:layout_constraintTop_toTopOf="@id/recycler"
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
@@ -551,6 +553,32 @@ jobs:
                               android:padding="16dp"
                               android:focusable="true"
                               android:clickable="true"
+                              android:background="@drawable/tile_selector"
+                              android:layout_marginBottom="8dp" />
+                          <TextView
+                              android:id="@+id/btnOpenLog"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="📋 Открыть лог"
+                              android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector"
+                              android:layout_marginBottom="8dp" />
+                          <TextView
+                              android:id="@+id/btnShareLog"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="📤 Отправить лог"
+                              android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
                               android:background="@drawable/tile_selector" />
                       </LinearLayout>
 
@@ -597,9 +625,6 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
-          # =====================================================================
-          # ПЛЕЕР: обычный PlayerView + оверлей с подсветкой кнопок при фокусе
-          # =====================================================================
           cat > app/src/main/res/layout/activity_player.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -788,18 +813,36 @@ jobs:
                   android:visibility="gone"
                   android:background="#DD000000"
                   android:padding="24dp">
+
                   <TextView
                       android:id="@+id/errorText"
-                      android:layout_width="wrap_content"
+                      android:layout_width="match_parent"
                       android:layout_height="wrap_content"
                       android:textColor="#FFAAAAAA"
-                      android:textSize="16sp"
+                      android:textSize="14sp"
+                      android:lineSpacingExtra="3dp"
                       android:gravity="center" />
+
+                  <TextView
+                      android:id="@+id/btnShowLog"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="12dp"
+                      android:background="#333333"
+                      android:paddingHorizontal="20dp"
+                      android:paddingVertical="10dp"
+                      android:text="📋 Подробнее"
+                      android:textColor="#FFFFFF"
+                      android:textSize="14sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+
                   <TextView
                       android:id="@+id/btnRetry"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:layout_marginTop="16dp"
+                      android:layout_marginTop="12dp"
                       android:background="#333333"
                       android:paddingHorizontal="24dp"
                       android:paddingVertical="12dp"
@@ -828,10 +871,7 @@ jobs:
               android:background="?attr/selectableItemBackground" />
           EOF
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 2: Python
-      # ═══════════════════════════════════════════════════
-      - name: "🐍 Python"
+      - name: "🐍 Python (с логированием)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
@@ -868,7 +908,7 @@ jobs:
                   if best: return best["url"]
                   return info.get("url") or "ERROR: no m3u8 found"
               except Exception as e:
-                  return "ERROR: " + str(e)
+                  return "ERROR[" + type(e).__name__ + "]: " + str(e)
           def get_thumbnail(url):
               try:
                   req = urllib.request.Request(url, headers=HEADERS)
@@ -888,10 +928,125 @@ jobs:
                   return ""
           EOF
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 3: Kotlin Core
-      # ═══════════════════════════════════════════════════
-      - name: "🧠 Kotlin Core"
+      - name: "📝 CrashLogger + TVPlayerApp"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          # НОВЫЙ ФАЙЛ: CrashLogger — центральный логгер
+          cat > app/src/main/java/com/tvplayer/app/CrashLogger.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import androidx.core.content.FileProvider
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          object CrashLogger {
+              private const val LOG_FILE = "app.log"
+              private const val MAX_SIZE = 500 * 1024  // 500 КБ
+              private var appContext: Context? = null
+              private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+              @Synchronized
+              fun init(context: Context) {
+                  if (appContext != null) return
+                  appContext = context.applicationContext
+
+                  // Перехватываем необработанные исключения
+                  val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+                  Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                      log("CRASH", "Uncaught exception in thread ${thread.name}: ${throwable.javaClass.simpleName}")
+                      log("CRASH", throwable.stackTraceToString())
+                      defaultHandler?.uncaughtException(thread, throwable)
+                  }
+
+                  // Заголовок сессии
+                  val appVersion = try { BuildConfig.VERSION_CODE.toString() } catch (_: Exception) { "?" }
+                  val device = "${Build.MANUFACTURER} ${Build.MODEL}"
+                  val android = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+                  val channel = try { BuildConfig.GITHUB_REPO } catch (_: Exception) { "?" }
+                  log("INIT", "═══ App started ═══")
+                  log("INIT", "Version: v$appVersion")
+                  log("INIT", "Device: $device")
+                  log("INIT", "Android: $android")
+                  log("INIT", "yt-dlp updated at build time")
+                  log("INIT", "Repo: $channel")
+              }
+
+              @Synchronized
+              fun log(tag: String, message: String) {
+                  val ctx = appContext ?: return
+                  try {
+                      val file = File(ctx.filesDir, LOG_FILE)
+                      // Ротация
+                      if (file.exists() && file.length() > MAX_SIZE) {
+                          val content = file.readText()
+                          val cut = content.length / 2
+                          val firstNewline = content.indexOf('\n', cut)
+                          val trimmed = if (firstNewline > 0) content.substring(firstNewline + 1) else content
+                          file.writeText(trimmed)
+                      }
+                      val timestamp = dateFormat.format(Date())
+                      val line = "[$timestamp] [$tag] $message\n"
+                      file.appendText(line)
+                  } catch (_: Exception) {}
+              }
+
+              fun info(tag: String, message: String) = log(tag, message)
+
+              fun error(tag: String, message: String, throwable: Throwable? = null) {
+                  log(tag, "❌ $message")
+                  throwable?.let { log(tag, it.stackTraceToString()) }
+              }
+
+              fun readAll(context: Context): String {
+                  return try {
+                      val file = File(context.filesDir, LOG_FILE)
+                      if (file.exists()) file.readText() else "Лог пуст"
+                  } catch (e: Exception) {
+                      "Не удалось прочитать лог: ${e.message}"
+                  }
+              }
+
+              fun clear(context: Context) {
+                  try { File(context.filesDir, LOG_FILE).delete() } catch (_: Exception) {}
+              }
+
+              fun share(context: Context) {
+                  try {
+                      val file = File(context.filesDir, LOG_FILE)
+                      if (!file.exists()) return
+                      val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                      val intent = Intent(Intent.ACTION_SEND).apply {
+                          type = "text/plain"
+                          putExtra(Intent.EXTRA_STREAM, uri)
+                          putExtra(Intent.EXTRA_SUBJECT, "TV Player — лог")
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      }
+                      context.startActivity(Intent.createChooser(intent, "Отправить лог"))
+                  } catch (e: Exception) {
+                      log("SHARE", "Не удалось отправить лог: ${e.message}")
+                  }
+              }
+          }
+          EOF
+
+          # НОВЫЙ ФАЙЛ: TVPlayerApp — инициализация логгера при старте приложения
+          cat > app/src/main/java/com/tvplayer/app/TVPlayerApp.kt << 'EOF'
+          package com.tvplayer.app
+          import com.chaquo.python.android.PyApplication
+
+          class TVPlayerApp : PyApplication() {
+              override fun onCreate() {
+                  super.onCreate()
+                  CrashLogger.init(this)
+              }
+          }
+          EOF
+
+      - name: "🧠 Kotlin Core (с логированием)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
@@ -903,12 +1058,17 @@ jobs:
           import org.json.JSONObject
           import java.util.UUID
           import java.util.concurrent.TimeUnit
+
           data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
+
           private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
           private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
           suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
               withContext(Dispatchers.IO) {
                   val result = mutableListOf<Channel>()
+                  val startTime = System.currentTimeMillis()
+                  CrashLogger.info("VkApi", "→ Загрузка каналов, category=$categoryId")
                   try {
                       val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
                       val req = Request.Builder().url(url)
@@ -917,6 +1077,7 @@ jobs:
                           .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
                       client.newCall(req).execute().use { resp ->
                           val body = resp.body?.string().orEmpty()
+                          CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер ответа: ${body.length} байт")
                           if (resp.isSuccessful && body.isNotBlank()) {
                               val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
                               if (streams != null) for (i in 0 until streams.length()) {
@@ -929,11 +1090,90 @@ jobs:
                                   val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null } ?: blog.optString("coverUrl")
                                   result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
                               }
+                          } else {
+                              CrashLogger.error("VkApi", "Неуспешный ответ HTTP ${resp.code}")
                           }
                       }
-                  } catch (_: Exception) {}
+                  } catch (e: Exception) {
+                      CrashLogger.error("VkApi", "Ошибка загрузки каналов", e)
+                  }
+                  val elapsed = System.currentTimeMillis() - startTime
+                  CrashLogger.info("VkApi", "✓ Загружено ${result.size} каналов за ${elapsed}мс (+ ${manual.size} ручных)")
                   result + manual
               }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/ChannelCache.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.File
+
+          object ChannelCache {
+              private const val FILE_NAME = "channels_cache.json"
+              private const val FRESH_TTL_MS = 6 * 60 * 60 * 1000L
+              private const val EXPIRE_TTL_MS = 24 * 60 * 60 * 1000L
+
+              fun save(context: Context, channels: List<Channel>) {
+                  try {
+                      val arr = JSONArray()
+                      channels.forEach { ch ->
+                          val obj = JSONObject()
+                          obj.put("name", ch.name)
+                          obj.put("url", ch.url)
+                          obj.put("logo", ch.logo)
+                          obj.put("group", ch.group)
+                          arr.put(obj)
+                      }
+                      val root = JSONObject()
+                      root.put("timestamp", System.currentTimeMillis())
+                      root.put("channels", arr)
+                      File(context.filesDir, FILE_NAME).writeText(root.toString())
+                      CrashLogger.info("ChannelCache", "Сохранено ${channels.size} каналов")
+                  } catch (e: Exception) {
+                      CrashLogger.error("ChannelCache", "Ошибка сохранения", e)
+                  }
+              }
+
+              fun load(context: Context): List<Channel>? {
+                  try {
+                      val file = File(context.filesDir, FILE_NAME)
+                      if (!file.exists()) return null
+                      val root = JSONObject(file.readText())
+                      val ts = root.optLong("timestamp", 0L)
+                      if (System.currentTimeMillis() - ts > EXPIRE_TTL_MS) {
+                          CrashLogger.info("ChannelCache", "Кэш устарел (>24ч)")
+                          return null
+                      }
+                      val arr = root.optJSONArray("channels") ?: return null
+                      val result = mutableListOf<Channel>()
+                      for (i in 0 until arr.length()) {
+                          val obj = arr.optJSONObject(i) ?: continue
+                          result.add(Channel(obj.optString("name"), obj.optString("url"), obj.optString("logo"), obj.optString("group", "VK Live")))
+                      }
+                      CrashLogger.info("ChannelCache", "Загружено ${result.size} каналов из кэша")
+                      return result
+                  } catch (e: Exception) {
+                      CrashLogger.error("ChannelCache", "Ошибка чтения", e)
+                      return null
+                  }
+              }
+
+              fun isFresh(context: Context): Boolean {
+                  try {
+                      val file = File(context.filesDir, FILE_NAME)
+                      if (!file.exists()) return false
+                      val root = JSONObject(file.readText())
+                      val ts = root.optLong("timestamp", 0L)
+                      return System.currentTimeMillis() - ts < FRESH_TTL_MS
+                  } catch (_: Exception) { return false }
+              }
+
+              fun clear(context: Context) {
+                  try { File(context.filesDir, FILE_NAME).delete() } catch (_: Exception) {}
+              }
+          }
           EOF
 
           cat > app/src/main/java/com/tvplayer/app/NetworkUtils.kt << 'EOF'
@@ -959,10 +1199,23 @@ jobs:
           import kotlinx.coroutines.withContext
           object StreamResolver {
               suspend fun resolve(url: String): String = withContext(Dispatchers.IO) {
+                  val start = System.currentTimeMillis()
+                  CrashLogger.info("StreamResolver", "→ Резолв: $url")
                   try {
                       val m = Python.getInstance().getModule("resolver")
-                      m.callAttr("resolve", url).toString()
-                  } catch (e: Exception) { "ERROR: " + (e.message ?: e.toString()) }
+                      val result = m.callAttr("resolve", url).toString()
+                      val elapsed = System.currentTimeMillis() - start
+                      if (result.startsWith("ERROR")) {
+                          CrashLogger.error("StreamResolver", "✗ Резолв провален за ${elapsed}мс: $result")
+                      } else {
+                          CrashLogger.info("StreamResolver", "✓ Резолв за ${elapsed}мс → ${result.take(80)}...")
+                      }
+                      result
+                  } catch (e: Exception) {
+                      val elapsed = System.currentTimeMillis() - start
+                      CrashLogger.error("StreamResolver", "✗ Исключение при резолве за ${elapsed}мс", e)
+                      "ERROR[${e.javaClass.simpleName}]: ${e.message ?: "unknown"}"
+                  }
               }
               suspend fun getThumbnail(url: String): String = withContext(Dispatchers.IO) {
                   try {
@@ -978,7 +1231,7 @@ jobs:
           import android.content.Context
           object StreamCache {
               private const val PREFS = "stream_cache"
-              private const val TTL_MS = 60 * 60 * 1000L
+              private const val TTL_MS = 2 * 60 * 60 * 1000L
               fun get(context: Context, channelUrl: String): String? {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val entry = prefs.getString(channelUrl, null) ?: return null
@@ -1079,6 +1332,7 @@ jobs:
                   try {
                       val repo = BuildConfig.GITHUB_REPO
                       if (repo.isBlank() || repo.contains("user/")) return@withContext null
+                      CrashLogger.info("OTA", "→ Проверка обновлений (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
                       val url = "https://api.github.com/repos/$repo/releases/latest"
                       val client = OkHttpClient.Builder()
                           .connectTimeout(10, TimeUnit.SECONDS)
@@ -1087,49 +1341,67 @@ jobs:
                           .header("Accept", "application/vnd.github+json")
                           .header("User-Agent", "TVPlayer").build()
                       client.newCall(req).execute().use { resp ->
-                          if (!resp.isSuccessful) return@withContext null
+                          if (!resp.isSuccessful) {
+                              CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}")
+                              return@withContext null
+                          }
                           val body = resp.body?.string() ?: return@withContext null
                           val json = JSONObject(body)
                           val tag = json.optString("tag_name").removePrefix("v")
                           val newVersion = tag.toIntOrNull() ?: 0
-                          if (newVersion <= BuildConfig.VERSION_CODE) return@withContext null
+                          if (newVersion <= BuildConfig.VERSION_CODE) {
+                              CrashLogger.info("OTA", "✓ Установлена последняя версия (v${BuildConfig.VERSION_CODE})")
+                              return@withContext null
+                          }
                           val assets = json.optJSONArray("assets") ?: return@withContext null
                           if (assets.length() == 0) return@withContext null
                           val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
                           if (apkUrl.isBlank()) return@withContext null
+                          CrashLogger.info("OTA", "🎉 Доступно обновление v$newVersion")
                           UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия приложения"))
                       }
-                  } catch (e: Exception) { null }
+                  } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка проверки обновлений", e)
+                      null
+                  }
               }
 
               suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
                   try {
+                      CrashLogger.info("OTA", "→ Скачивание APK: $url")
                       val client = OkHttpClient.Builder()
                           .connectTimeout(30, TimeUnit.SECONDS)
                           .readTimeout(120, TimeUnit.SECONDS).build()
                       val req = Request.Builder().url(url).build()
                       client.newCall(req).execute().use { resp ->
-                          if (!resp.isSuccessful) return@withContext null
+                          if (!resp.isSuccessful) {
+                              CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}")
+                              return@withContext null
+                          }
                           val file = File(context.cacheDir, "update.apk")
                           resp.body?.byteStream()?.use { input ->
                               file.outputStream().use { output -> input.copyTo(output) }
                           }
+                          CrashLogger.info("OTA", "✓ APK скачан: ${file.length() / 1024 / 1024} МБ")
                           file
                       }
-                  } catch (e: Exception) { null }
+                  } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка скачивания APK", e)
+                      null
+                  }
               }
           }
           EOF
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 4: MainActivity (двойной BACK)
-      # ═══════════════════════════════════════════════════
-      - name: "🧠 MainActivity"
+      - name: "🧠 MainActivity (логирование + клик по ошибке)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
           package com.tvplayer.app
           import android.app.AlertDialog
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
           import android.content.Intent
           import android.net.Uri
           import android.os.Bundle
@@ -1156,6 +1428,7 @@ jobs:
               private var showOnlyFavorites = false
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
               private var backPressedTime: Long = 0
+              private var needScrollOnResume = false
 
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
@@ -1169,16 +1442,20 @@ jobs:
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
                   autoCleanCache()
-                  b.btnRefresh.setOnClickListener { load() }
-                  b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
+                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+                  b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
                   b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
                   b.btnFavFilter.nextFocusDownId = R.id.recycler
                   b.btnRefresh.nextFocusDownId = R.id.recycler
                   b.btnSettings.nextFocusDownId = R.id.recycler
 
+                  // Клик по ошибке = показать полный лог
+                  b.error.setOnClickListener { showLogDialog() }
+
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() {
-                          if (System.currentTimeMillis() - backPressedTime < 2000) {
+                          if (System.currentTimeMillis() - backPressedTime < 3000) {
+                              CrashLogger.info("Lifecycle", "Полный выход из приложения (двойной BACK)")
                               exitApp()
                           } else {
                               Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
@@ -1187,8 +1464,104 @@ jobs:
                       }
                   })
 
-                  load()
+                  loadInitial()
                   checkForUpdates()
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  if (needScrollOnResume && allChannels.isNotEmpty()) {
+                      needScrollOnResume = false
+                      b.recycler.postDelayed({ scrollToLastChannel() }, 200)
+                  }
+              }
+
+              private fun scrollToLastChannel() {
+                  val lastIndex = prefs.getInt("last_channel", 0)
+                  if (lastIndex in allChannels.indices) {
+                      (b.recycler.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(lastIndex, 0)
+                      b.recycler.postDelayed({
+                          b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus()
+                      }, 100)
+                  }
+              }
+
+              private fun loadInitial() {
+                  val cached = ChannelCache.load(this)
+                  if (cached != null && cached.isNotEmpty()) {
+                      allChannels = cached
+                      updateView(scrollToLast = true)
+                      if (ChannelCache.isFresh(this)) {
+                          CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем")
+                          return
+                      }
+                      CrashLogger.info("MainActivity", "Кэш устарел — обновление в фоне")
+                      loadFromNetwork(forceRefresh = false)
+                  } else {
+                      CrashLogger.info("MainActivity", "Кэш пуст — полная загрузка")
+                      b.progress.visibility = View.VISIBLE
+                      loadFromNetwork(forceRefresh = false)
+                  }
+              }
+
+              private fun loadFromNetwork(forceRefresh: Boolean) {
+                  if (!NetworkUtils.isOnline(this)) {
+                      CrashLogger.info("MainActivity", "Нет интернета — загрузка отменена")
+                      if (allChannels.isEmpty()) {
+                          b.progress.visibility = View.GONE
+                          b.recycler.visibility = View.GONE
+                          b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
+                          b.error.visibility = View.VISIBLE
+                      }
+                      return
+                  }
+                  lifecycleScope.launch {
+                      try {
+                          val (manual, cat) = readConfig()
+                          val manualWithLogos = manual.map { ch ->
+                              if (ch.logo.isBlank()) {
+                                  val thumb = StreamResolver.getThumbnail(ch.url)
+                                  if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                              } else ch
+                          }
+                          val fresh = loadChannels(cat, manualWithLogos)
+                          b.progress.visibility = View.GONE
+                          if (fresh.isNotEmpty()) {
+                              val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
+                              allChannels = fresh
+                              ChannelCache.save(this@MainActivity, fresh)
+                              if (changed || forceRefresh || b.recycler.adapter == null) {
+                                  updateView(scrollToLast = forceRefresh)
+                              }
+                          } else {
+                              val msg = "Не удалось загрузить каналы\n\nВозможно:\n• VK API вернул пустой список\n• Категория изменилась\n\nНажмите для подробностей."
+                              b.error.text = msg
+                              b.error.visibility = View.VISIBLE
+                              CrashLogger.error("MainActivity", "Пустой список каналов после загрузки")
+                          }
+                      } catch (e: Exception) {
+                          b.progress.visibility = View.GONE
+                          val msg = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}\n\nНажмите для подробностей."
+                          b.error.text = msg
+                          b.error.visibility = View.VISIBLE
+                          CrashLogger.error("MainActivity", "Исключение при загрузке", e)
+                      }
+                  }
+              }
+
+              private fun showLogDialog() {
+                  val log = CrashLogger.readAll(this)
+                  AlertDialog.Builder(this)
+                      .setTitle("Лог приложения")
+                      .setMessage(log.takeLast(3000))
+                      .setPositiveButton("Отправить") { _, _ -> CrashLogger.share(this) }
+                      .setNegativeButton("Скопировать") { _, _ ->
+                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                          clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                          Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                      }
+                      .setNeutralButton("Закрыть", null)
+                      .show()
               }
 
               private fun autoCleanCache() {
@@ -1196,6 +1569,7 @@ jobs:
                   cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
                   if (totalSize > 15 * 1024 * 1024) {
                       cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      CrashLogger.info("MainActivity", "Автоочистка кэша картинок")
                   }
               }
 
@@ -1231,10 +1605,13 @@ jobs:
               private fun installApk(file: File) {
                   if (!packageManager.canRequestPackageInstalls()) {
                       Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
+                      CrashLogger.info("OTA", "Нет разрешения на установку — открываем настройки")
                       try {
                           val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
                           startActivity(intent)
-                      } catch (_: Exception) {}
+                      } catch (e: Exception) {
+                          CrashLogger.error("OTA", "Не удалось открыть настройки", e)
+                      }
                       return
                   }
                   try {
@@ -1244,37 +1621,17 @@ jobs:
                           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                       }
                       startActivity(intent)
+                      CrashLogger.info("OTA", "Запущена установка APK")
                   } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка установки APK", e)
                       Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
                   }
               }
 
-              private fun load() {
-                  if (!NetworkUtils.isOnline(this)) {
-                      b.progress.visibility = View.GONE; b.recycler.visibility = View.GONE
-                      b.error.text = "Нет подключения к интернету."
-                      b.error.visibility = View.VISIBLE; return
-                  }
-                  b.progress.visibility = View.VISIBLE; b.error.visibility = View.GONE; b.recycler.visibility = View.GONE
-                  lifecycleScope.launch {
-                      val (manual, cat) = readConfig()
-                      val manualWithLogos = manual.map { ch ->
-                          if (ch.logo.isBlank()) {
-                              val thumb = StreamResolver.getThumbnail(ch.url)
-                              if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
-                          } else ch
-                      }
-                      allChannels = loadChannels(cat, manualWithLogos)
-                      b.progress.visibility = View.GONE
-                      if (allChannels.isEmpty()) {
-                          b.error.text = "Не удалось загрузить список."
-                          b.error.visibility = View.VISIBLE; return@launch
-                      }
-                      updateView()
-                  }
-              }
-
-              private fun updateView() {
+              private fun updateView(scrollToLast: Boolean = false) {
+                  if (allChannels.isEmpty()) return
+                  b.progress.visibility = View.GONE
+                  b.error.visibility = View.GONE
                   val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
                   allChannels.forEach { it.isFavorite = favs.contains(it.url) }
                   val sorted = allChannels.sortedByDescending { it.isFavorite }
@@ -1283,6 +1640,8 @@ jobs:
                   b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
                   b.recycler.visibility = View.VISIBLE
                   b.recycler.adapter = ChannelAdapter(displayed, { ch ->
+                      needScrollOnResume = true
+                      CrashLogger.info("UI", "Открытие канала: ${ch.name}")
                       val intent = Intent(this@MainActivity, PlayerActivity::class.java)
                       intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
                       intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))
@@ -1292,9 +1651,13 @@ jobs:
                       val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
                       if (currentFavs.contains(ch.url)) currentFavs.remove(ch.url) else currentFavs.add(ch.url)
                       prefs.edit().putStringSet("favorites", currentFavs).apply()
-                      updateView()
+                      updateView(scrollToLast = false)
                   })
-                  b.recycler.post { b.recycler.getChildAt(0)?.requestFocus() }
+
+                  b.recycler.post {
+                      if (scrollToLast) scrollToLastChannel()
+                      else b.recycler.getChildAt(0)?.requestFocus()
+                  }
               }
 
               private fun readConfig(): Pair<List<Channel>, String> {
@@ -1307,15 +1670,15 @@ jobs:
           }
           EOF
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 5: SettingsActivity
-      # ═══════════════════════════════════════════════════
-      - name: "⚙ SettingsActivity"
+      - name: "⚙ SettingsActivity (Открыть/Отправить лог)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
           package com.tvplayer.app
           import android.app.AlertDialog
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
           import android.content.Intent
           import android.graphics.Color
           import android.net.Uri
@@ -1351,6 +1714,7 @@ jobs:
                       • Таймер сна (от 5 минут до 5 часов)
                       • Авто-обновление приложения
                       • Умное кэширование ссылок и очистка кэша
+                      • Подробный лог всех операций
                       
                       ⚙️ ТЕХНОЛОГИИ:
                       • Резолвер: yt-dlp (Python + Chaquopy)
@@ -1373,12 +1737,33 @@ jobs:
                       imageLoader.diskCache?.clear()
                       imageLoader.memoryCache?.clear()
                       StreamCache.clearAll(this)
+                      ChannelCache.clear(this)
                       cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                       Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
                       updateCacheInfo()
+                      CrashLogger.info("Settings", "Кэш очищен вручную")
+                  }
+
+                  b.btnOpenLog.setOnClickListener {
+                      val log = CrashLogger.readAll(this)
+                      AlertDialog.Builder(this)
+                          .setTitle("Лог приложения")
+                          .setMessage(log.takeLast(3000))
+                          .setPositiveButton("Скопировать") { _, _ ->
+                              val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                              clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                              Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                          }
+                          .setNegativeButton("Закрыть", null)
+                          .show()
+                  }
+
+                  b.btnShareLog.setOnClickListener {
+                      CrashLogger.share(this)
                   }
 
                   b.btnExitApp.setOnClickListener {
+                      CrashLogger.info("Settings", "Полный выход из настроек")
                       finishAffinity()
                       android.os.Process.killProcess(android.os.Process.myPid())
                   }
@@ -1442,21 +1827,22 @@ jobs:
                       }
                       startActivity(intent)
                   } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка установки", e)
                       Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
                   }
               }
           }
           EOF
 
-      # ═══════════════════════════════════════════════════
-      # ШАГ 6: PlayerActivity (ручная навигация + подсветка) + коммит
-      # ═══════════════════════════════════════════════════
-      - name: "🎬 PlayerActivity (навигация + подсветка) + коммит"
+      - name: "🎬 PlayerActivity (логирование ошибок) + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
           package com.tvplayer.app
           import android.app.AlertDialog
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
           import android.graphics.Color
           import android.os.Bundle
           import android.os.CountDownTimer
@@ -1464,8 +1850,7 @@ jobs:
           import android.os.Looper
           import android.view.KeyEvent
           import android.view.View
-          import android.widget.ImageView
-          import android.widget.TextView
+          import android.widget.Toast
           import androidx.appcompat.app.AppCompatActivity
           import androidx.core.view.WindowCompat
           import androidx.core.view.WindowInsetsCompat
@@ -1530,25 +1915,31 @@ jobs:
                   b.btnExitApp.setOnClickListener { exitApp() }
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
                   b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
+
+                  // Кнопка "Подробнее" в диалоге ошибки
+                  b.btnShowLog.setOnClickListener { showLogDialog() }
               }
 
-              // ═══════════ ПОДСВЕТКА ФОКУСА ═══════════
-              // Фон кнопок меняется через селектор (button_focus_bg.xml).
-              // Здесь мы меняем ЦВЕТ ТЕКСТА, чтобы он читался на белом фоне при фокусе.
+              private fun showLogDialog() {
+                  val log = CrashLogger.readAll(this)
+                  AlertDialog.Builder(this)
+                      .setTitle("Лог приложения")
+                      .setMessage(log.takeLast(3000))
+                      .setPositiveButton("Скопировать") { _, _ ->
+                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                          clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                          Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                      }
+                      .setNegativeButton("Закрыть", null)
+                      .show()
+              }
+
               private fun setupFocusHighlight() {
-                  listOf(
-                      b.btnQuality,
-                      b.btnSleepTimer,
-                      b.btnAspect,
-                      b.btnBack,
-                      b.btnExitApp
-                  ).forEach { tv ->
+                  listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->
                       tv.setOnFocusChangeListener { _, hasFocus ->
                           tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
                       }
                   }
-                  // Для Play/Pause (ImageView) фон меняется сам через btn_play_pause_focus.xml,
-                  // цвет иконки белый остаётся читаемым на синем и прозрачном фоне.
               }
 
               private fun toggleAspect() {
@@ -1559,6 +1950,7 @@ jobs:
                   }
                   b.playerView.resizeMode = currentResizeMode
                   b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
+                  CrashLogger.info("Player", "Формат изменён на: ${b.btnAspect.text}")
               }
 
               private fun exitApp() {
@@ -1567,12 +1959,8 @@ jobs:
                   android.os.Process.killProcess(android.os.Process.myPid())
               }
 
-              // ═══════════ РУЧНАЯ НАВИГАЦИЯ ═══════════
               private fun handleMenuNavigation(keyCode: Int): Boolean {
-                  val cur = currentFocus ?: run {
-                      b.btnPlayPause.requestFocus()
-                      return true
-                  }
+                  val cur = currentFocus ?: run { b.btnPlayPause.requestFocus(); return true }
                   val nextId: Int? = when (cur.id) {
                       R.id.btnPlayPause -> when (keyCode) {
                           KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
@@ -1628,14 +2016,10 @@ jobs:
                       }
                       return super.dispatchKeyEvent(event)
                   }
-
                   if (b.controlsOverlay.visibility == View.VISIBLE) {
                       if (event.action == KeyEvent.ACTION_DOWN) {
                           when (event.keyCode) {
-                              KeyEvent.KEYCODE_BACK -> {
-                                  hideControlsRunnable.run()
-                                  return true
-                              }
+                              KeyEvent.KEYCODE_BACK -> { hideControlsRunnable.run(); return true }
                               KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                                   (currentFocus as? View)?.performClick()
                                   resetHideTimeout()
@@ -1651,13 +2035,12 @@ jobs:
                       }
                       return true
                   }
-
                   if (event.action == KeyEvent.ACTION_DOWN) {
                       when (event.keyCode) {
                           KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { switchChannel(-1); return true }
                           KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { switchChannel(1); return true }
                           KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { showChannelList(); return true }
-                          KeyEvent.KEYCODE_BACK -> { exitApp(); return true }
+                          KeyEvent.KEYCODE_BACK -> { finish(); return true }
                       }
                   }
                   return super.dispatchKeyEvent(event)
@@ -1694,6 +2077,7 @@ jobs:
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
                   val chNum = currentIndex + 1
                   val chName = names.getOrNull(currentIndex) ?: "Канал"
+                  CrashLogger.info("Player", "Открытие канала #$chNum: $chName")
                   b.channelNameOverlay.text = "$chNum. $chName"
                   b.channelNameOverlay.visibility = View.VISIBLE
                   handler.removeCallbacks(hideChannelOverlayRunnable)
@@ -1702,16 +2086,25 @@ jobs:
                   retryCount = 0
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
-                  if (cached != null) { play(cached); return }
+                  if (cached != null) {
+                      CrashLogger.info("Player", "Использую кэш ссылки")
+                      play(cached)
+                      return
+                  }
                   if (!NetworkUtils.isOnline(this)) {
                       b.progress.visibility = View.GONE
-                      b.errorText.text = "Нет подключения к интернету."
-                      b.errorLayout.visibility = View.VISIBLE; return
+                      b.errorText.text = "Нет подключения к интернету.\n\nПроверьте Wi-Fi или кабель и нажмите «Повторить»."
+                      b.errorLayout.visibility = View.VISIBLE
+                      CrashLogger.info("Player", "Нет интернета при открытии канала")
+                      return
                   }
                   b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
                       val direct = StreamResolver.resolve(channelUrl)
-                      if (direct.startsWith("ERROR:")) { handleError(); return@launch }
+                      if (direct.startsWith("ERROR")) {
+                          handleError(direct)
+                          return@launch
+                      }
                       StreamCache.put(this@PlayerActivity, channelUrl, direct)
                       play(direct)
                   }
@@ -1728,11 +2121,15 @@ jobs:
                       setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
                       playWhenReady = true; prepare()
                       addListener(object : Player.Listener {
-                          override fun onTracksChanged(tracks: Tracks) { updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE }
+                          override fun onTracksChanged(tracks: Tracks) {
+                              updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE
+                              CrashLogger.info("Player", "Воспроизведение началось")
+                          }
                           override fun onPlayerError(error: PlaybackException) {
                               super.onPlayerError(error)
+                              CrashLogger.error("Player", "Ошибка воспроизведения: ${error.errorCodeName} (${error.errorCode}) — ${error.message}")
                               urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
-                              handleError()
+                              handleError("Ошибка плеера: ${error.errorCodeName}\n${error.message?.take(200) ?: ""}")
                           }
                       })
                   }
@@ -1744,13 +2141,8 @@ jobs:
                   b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
                   b.btnPlayPause.setOnClickListener {
                       player?.let { p ->
-                          if (p.isPlaying) {
-                              p.pause()
-                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
-                          } else {
-                              p.play()
-                              b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-                          }
+                          if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) }
+                          else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) }
                       }
                       resetHideTimeout()
                   }
@@ -1766,6 +2158,7 @@ jobs:
                   val height = if (format.height > 0) "${format.height}p" else "Auto"
                   val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
                   b.btnQuality.text = height + bitrate
+                  CrashLogger.info("Player", "Качество: $height${bitrate}")
               }
 
               private fun showQualityDialog() {
@@ -1788,32 +2181,47 @@ jobs:
                   }.show()
               }
 
-              private fun handleError() {
+              private fun handleError(errorText: String? = null) {
                   if (retryCount < MAX_RETRIES) {
-                      retryCount++; b.progress.visibility = View.VISIBLE; handler.postDelayed({ startPlayback() }, RETRY_DELAY)
+                      retryCount++
+                      b.progress.visibility = View.VISIBLE
+                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES через ${RETRY_DELAY}мс")
+                      handler.postDelayed({ startPlayback() }, RETRY_DELAY)
                   } else {
                       b.progress.visibility = View.GONE
-                      b.errorText.text = "Не удалось подключиться к потоку.\nСделано попыток: $MAX_RETRIES"
-                      b.errorLayout.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE
-                      b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
+                      val details = errorText ?: "Неизвестная ошибка"
+                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"
+                      b.errorLayout.visibility = View.VISIBLE
+                      b.controlsOverlay.visibility = View.GONE
+                      b.rightControls.visibility = View.GONE
+                      b.btnSleepTimer.visibility = View.GONE
+                      b.leftControls.visibility = View.GONE
+                      CrashLogger.error("Player", "Все $MAX_RETRIES попыток исчерпаны")
                   }
               }
 
               private fun showSleepTimerDialog() {
                   val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
                   val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
-                  AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which -> val mins = minutes[which]; if (mins == 0) cancelSleepTimer() else startSleepTimer(mins) }.show()
+                  AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which ->
+                      val mins = minutes[which]
+                      if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
+                  }.show()
               }
 
               private fun startSleepTimer(minutes: Int) {
                   sleepTimer?.cancel()
+                  CrashLogger.info("Player", "Таймер сна установлен на $minutes минут")
                   val millis = minutes * 60 * 1000L
                   sleepTimer = object : CountDownTimer(millis, 1000) {
                       override fun onTick(millisUntilFinished: Long) {
                           val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60
                           b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
                       }
-                      override fun onFinish() { exitApp() }
+                      override fun onFinish() {
+                          CrashLogger.info("Player", "Таймер сна сработал — выключаюсь")
+                          exitApp()
+                      }
                   }.start()
                   resetHideTimeout()
               }
@@ -1830,7 +2238,9 @@ jobs:
               }
 
               override fun onDestroy() {
-                  super.onDestroy(); handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
+                  super.onDestroy()
+                  CrashLogger.info("Player", "Закрытие плеера")
+                  handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
               }
           }
           EOF
@@ -1840,12 +2250,9 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: focus highlight for player buttons" || echo "no changes"
+          git commit -m "feat: full logging system (CrashLogger) + on-screen errors with detail dialog" || echo "no changes"
           git push || echo "push failed"
 
-      # ═══════════════════════════════════════════════════
-      # СБОРКА И РЕЛИЗ
-      # ═══════════════════════════════════════════════════
       - name: "🔨 Build APK"
         if: steps.checkytdlp.outputs.skip != 'true'
         id: build
@@ -1880,10 +2287,23 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🎨 **Добавлена визуальная подсветка кнопок в плеере:**
-            - При перемещении фокуса кнопка становится **белой** с синей обводкой, а текст — чёрным.
-            - **Play/Pause** — при фокусе становится синим кругом с белой иконкой.
-            - Раньше кнопки нажимались «наугад» — теперь видно, где фокус.
+            📋 **Полная система логирования:**
+
+            **Что теперь логируется:**
+            - Старт приложения (версия, устройство, Android)
+            - Загрузка каналов (URL, HTTP-код, время, количество)
+            - Каждый резолв (URL, результат, время, ошибка если есть)
+            - Воспроизведение (старт, ошибки плеера с кодом)
+            - OTA (проверка, скачивание, установка)
+            - Все неперехваченные краши
+
+            **Где смотреть:**
+            - **В приложении:** при ошибке → нажать «Подробнее» → диалог с логом → «Скопировать» / отправить.
+            - **В настройках:** кнопки «📋 Открыть лог» и «📤 Отправить лог» (через Telegram/почту).
+
+            **Лог хранится** в `filesDir/app.log`, максимум 500 КБ (авторотация).
+
+            **На экране при ошибке** теперь показывается **понятный текст** (например, «HTTP 403», «Unsupported URL») + кнопка «Подробнее».
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
