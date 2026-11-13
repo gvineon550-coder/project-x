@@ -31,12 +31,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var backPressedTime: Long = 0
     private var needScrollOnResume = false
 
-    companion object {
-        // Static-флаг: не сбрасывается при пересоздании Activity
-        @Volatile private var otaCheckInProgress = false
-        @Volatile private var otaCheckedThisSession = false
-    }
-
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
@@ -183,46 +177,40 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    // ═══ ЖЕЛЕЗОБЕТОННАЯ OTA-ЗАЩИТА ═══
-    // 3 уровня защиты:
-    // 1) static @Volatile флаг (живёт в памяти процесса)
-    // 2) prefs-метка (живёт между запусками, 6 часов)
-    // 3) otaCheckInProgress — защита от параллельных вызовов
+    // ═══ ФИНАЛЬНАЯ OTA-ЗАЩИТА ═══
+    // Используем .commit() (синхронная запись на диск), проверяем
+    // и версию, и время. С debug-логом, чтобы видеть значения.
     private fun checkForUpdates() {
-        // Уровень 1: сессионный флаг (переживает пересоздание Activity)
-        if (otaCheckedThisSession) {
-            CrashLogger.info("OTA", "Пропуск (уже проверяли в этой сессии)")
-            return
-        }
-        // Уровень 2: параллельные вызовы
-        if (otaCheckInProgress) {
-            CrashLogger.info("OTA", "Пропуск (проверка уже идёт)")
-            return
-        }
-        // Уровень 3: prefs (между запусками, 6ч)
+        val currentVersion = BuildConfig.VERSION_CODE
+        val lastVersion = prefs.getInt("last_ota_version", 0)
         val lastCheck = prefs.getLong("last_ota_check", 0L)
         val sinceLast = System.currentTimeMillis() - lastCheck
-        if (lastCheck != 0L && sinceLast < 6 * 60 * 60 * 1000L) {
-            otaCheckedThisSession = true
-            CrashLogger.info("OTA", "Пропуск (проверяли ${sinceLast / 60000} мин назад)")
+        val sinceLastMin = sinceLast / 60000
+
+        CrashLogger.info("OTA",
+            "Debug: current=v$currentVersion, lastChecked=v$lastVersion, " +
+            "sinceLast=${sinceLastMin}мин, lastCheck=$lastCheck")
+
+        // Пропускаем, если версия та же И проверяли меньше 6 часов назад
+        if (lastCheck != 0L && lastVersion == currentVersion && sinceLast < 6 * 60 * 60 * 1000L) {
+            CrashLogger.info("OTA", "Пропуск (v$currentVersion, проверяли ${sinceLastMin}мин назад)")
             return
         }
 
-        // Все проверки пройдены — запускаем
-        otaCheckInProgress = true
-        otaCheckedThisSession = true
-        prefs.edit().putLong("last_ota_check", System.currentTimeMillis()).apply()
+        // Атомарная синхронная запись — гарантия, что 2-й вызов увидит новые значения
+        val committed = prefs.edit()
+            .putInt("last_ota_version", currentVersion)
+            .putLong("last_ota_check", System.currentTimeMillis())
+            .commit()
+        CrashLogger.info("OTA", "Запуск проверки (committed=$committed)")
+
         lifecycleScope.launch {
-            try {
-                val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
-                UpdateDialog.show(
-                    this@MainActivity,
-                    info.versionCode,
-                    info.changelog,
-                ) { startUpdateDownload(info.downloadUrl) }
-            } finally {
-                otaCheckInProgress = false
-            }
+            val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
+            UpdateDialog.show(
+                this@MainActivity,
+                info.versionCode,
+                info.changelog,
+            ) { startUpdateDownload(info.downloadUrl) }
         }
     }
 
