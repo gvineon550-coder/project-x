@@ -1422,7 +1422,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 MainActivity (commit() + debug log)"
+      - name: "🧠 MainActivity (@Volatile сессионный флаг)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1458,6 +1458,12 @@ jobs:
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
               private var backPressedTime: Long = 0
               private var needScrollOnResume = false
+
+              companion object {
+                  // ⚡ Живёт в памяти JVM-процесса, не сбрасывается при пересоздании Activity.
+                  // Гарантирует: 1 проверка OTA на запуск приложения.
+                  @Volatile private var otaCheckedThisSession = false
+              }
 
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
@@ -1605,32 +1611,35 @@ jobs:
                   android.os.Process.killProcess(android.os.Process.myPid())
               }
 
-              // ═══ ФИНАЛЬНАЯ OTA-ЗАЩИТА ═══
-              // Используем .commit() (синхронная запись на диск), проверяем
-              // и версию, и время. С debug-логом, чтобы видеть значения.
+              // ═══ OTA-ЗАЩИТА (план А): @Volatile флаг в companion object ═══
               private fun checkForUpdates() {
+                  // Уровень 1: сессионный флаг — НЕ сбрасывается при пересоздании Activity
+                  if (otaCheckedThisSession) {
+                      CrashLogger.info("OTA", "Пропуск (уже проверяли в этой сессии)")
+                      return
+                  }
+
                   val currentVersion = BuildConfig.VERSION_CODE
                   val lastVersion = prefs.getInt("last_ota_version", 0)
                   val lastCheck = prefs.getLong("last_ota_check", 0L)
                   val sinceLast = System.currentTimeMillis() - lastCheck
-                  val sinceLastMin = sinceLast / 60000
 
-                  CrashLogger.info("OTA",
-                      "Debug: current=v$currentVersion, lastChecked=v$lastVersion, " +
-                      "sinceLast=${sinceLastMin}мин, lastCheck=$lastCheck")
+                  CrashLogger.info("OTA", "Debug: current=v$currentVersion, lastChecked=v$lastVersion, sinceLast=${sinceLast / 60000}мин")
 
-                  // Пропускаем, если версия та же И проверяли меньше 6 часов назад
+                  // Уровень 2: prefs — 6 часов между разными запусками приложения
                   if (lastCheck != 0L && lastVersion == currentVersion && sinceLast < 6 * 60 * 60 * 1000L) {
-                      CrashLogger.info("OTA", "Пропуск (v$currentVersion, проверяли ${sinceLastMin}мин назад)")
+                      otaCheckedThisSession = true
+                      CrashLogger.info("OTA", "Пропуск (v$currentVersion, ${sinceLast / 60000}мин назад)")
                       return
                   }
 
-                  // Атомарная синхронная запись — гарантия, что 2-й вызов увидит новые значения
-                  val committed = prefs.edit()
+                  // Оба уровня пройдены — запускаем и ставим флаг СРАЗУ
+                  otaCheckedThisSession = true
+                  prefs.edit()
                       .putInt("last_ota_version", currentVersion)
                       .putLong("last_ota_check", System.currentTimeMillis())
                       .commit()
-                  CrashLogger.info("OTA", "Запуск проверки (committed=$committed)")
+                  CrashLogger.info("OTA", "Запуск проверки (сессия+prefs)")
 
                   lifecycleScope.launch {
                       val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
@@ -2299,7 +2308,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: OTA triple-check with commit() + version+time check + debug log" || echo "no changes"
+          git commit -m "fix: OTA @Volatile session flag in workflow (single check per process)" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2336,16 +2345,20 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛠 **Финальный фикс OTA:**
+            🛠 **Финальный OTA-фикс (в workflow):**
 
-            - **`.commit()` вместо `.apply()`** — синхронная запись в SharedPreferences (гарантия, что 2-й вызов Activity увидит новые значения).
-            - **Проверка двух ключей** — `last_ota_version` + `last_ota_check` (защита от пересоздания Activity).
-            - **Debug-логирование** — в логе будет видно `current=vN, lastChecked=vN, sinceLast=Xмин, lastCheck=TIMESTAMP`. Если фикс снова не сработает — по этим значениям поймём, в чём дело.
+            - **`@Volatile` флаг в `companion object`** — гарантирует 1 проверку OTA на запуск процесса. Переживает пересоздание Activity.
+            - **prefs** — 6 часов между разными запусками приложения.
+            - **Debug-лог** — увидим, что происходит.
 
-            **Ожидаемый лог при запуске:**
+            **Ожидаемый лог:**
             ```
-            [OTA] Debug: current=v31, lastChecked=v30, sinceLast=1мин
-            [OTA] Пропуск (v31, проверяли 1мин назад)
+            [OTA] Debug: current=v33, lastChecked=v32, sinceLast=Xмин
+            [OTA] Запуск проверки (сессия+prefs)        ← 1-й вызов
+            [OTA] → Проверка обновлений
+            [OTA] ✓ Установлена последняя версия
+            [OTA] Пропуск (уже проверяли в этой сессии)  ← 2-й вызов
+            [OTA] Пропуск (уже проверяли в этой сессии)  ← 3-й вызов
             ```
 
             📦 Скачайте APK ниже и установите поверх старой версии.
