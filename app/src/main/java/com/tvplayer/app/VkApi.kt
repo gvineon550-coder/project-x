@@ -8,7 +8,6 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
-
 private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
 private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 

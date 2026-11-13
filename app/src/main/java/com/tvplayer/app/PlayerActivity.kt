@@ -75,8 +75,6 @@ class PlayerActivity : AppCompatActivity() {
         b.btnExitApp.setOnClickListener { exitApp() }
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
         b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
-
-        // Кнопка "Подробнее" в диалоге ошибки
         b.btnShowLog.setOnClickListener { showLogDialog() }
     }
 

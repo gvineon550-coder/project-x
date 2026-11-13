@@ -49,8 +49,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b.btnFavFilter.nextFocusDownId = R.id.recycler
         b.btnRefresh.nextFocusDownId = R.id.recycler
         b.btnSettings.nextFocusDownId = R.id.recycler
-
-        // Клик по ошибке = показать полный лог
         b.error.setOnClickListener { showLogDialog() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -179,15 +177,22 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
+    // ═══ OTA: защита от повторных проверок — не чаще раза в 6 часов ═══
     private fun checkForUpdates() {
+        val lastCheck = prefs.getLong("last_ota_check", 0L)
+        val sinceLast = System.currentTimeMillis() - lastCheck
+        if (sinceLast < 6 * 60 * 60 * 1000L && lastCheck != 0L) {
+            CrashLogger.info("OTA", "Пропуск проверки (проверяли ${sinceLast / 60000} мин назад)")
+            return
+        }
+        prefs.edit().putLong("last_ota_check", System.currentTimeMillis()).apply()
         lifecycleScope.launch {
             val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle("Доступно обновление v${info.versionCode}")
-                .setMessage(info.changelog.take(400))
-                .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
-                .setNegativeButton("Позже", null)
-                .show()
+            UpdateDialog.show(
+                this@MainActivity,
+                info.versionCode,
+                info.changelog,
+            ) { startUpdateDownload(info.downloadUrl) }
         }
     }
 

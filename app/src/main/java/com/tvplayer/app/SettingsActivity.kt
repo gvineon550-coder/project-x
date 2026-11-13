@@ -54,7 +54,7 @@ class SettingsActivity : AppCompatActivity() {
 
         b.btnBack.setOnClickListener { finish() }
         checkUpdate(silent = true)
-        b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
+        b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false, force = true) }
 
         b.btnClearCache.setOnClickListener {
             val imageLoader = Coil.imageLoader(this)
@@ -93,7 +93,7 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkUpdate(silent: Boolean) {
+    private fun checkUpdate(silent: Boolean, force: Boolean = false) {
         b.txtStatus.text = "⏳ Проверка обновлений..."
         b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
         lifecycleScope.launch {
@@ -105,12 +105,11 @@ class SettingsActivity : AppCompatActivity() {
             } else {
                 b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
                 b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
-                AlertDialog.Builder(this@SettingsActivity)
-                    .setTitle("Доступно обновление v${info.versionCode}")
-                    .setMessage(info.changelog.take(400))
-                    .setPositiveButton("Скачать и установить") { _, _ -> startUpdateDownload(info.downloadUrl) }
-                    .setNegativeButton("Позже", null)
-                    .show()
+                UpdateDialog.show(
+                    this@SettingsActivity,
+                    info.versionCode,
+                    info.changelog,
+                ) { startUpdateDownload(info.downloadUrl) }
             }
         }
     }
