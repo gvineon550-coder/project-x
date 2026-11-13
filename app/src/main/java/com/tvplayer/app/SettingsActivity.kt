@@ -54,7 +54,7 @@ class SettingsActivity : AppCompatActivity() {
 
         b.btnBack.setOnClickListener { finish() }
         checkUpdate(silent = true)
-        b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false, force = true) }
+        b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
 
         b.btnClearCache.setOnClickListener {
             val imageLoader = Coil.imageLoader(this)
@@ -93,7 +93,7 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkUpdate(silent: Boolean, force: Boolean = false) {
+    private fun checkUpdate(silent: Boolean) {
         b.txtStatus.text = "⏳ Проверка обновлений..."
         b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
         lifecycleScope.launch {
