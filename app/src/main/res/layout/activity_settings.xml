@@ -115,11 +115,34 @@
                     android:letterSpacing="0.1"
                     android:paddingBottom="12dp" />
                 <TextView
+                    android:id="@+id/txtCacheStats"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Подсчёт..."
+                    android:textColor="@color/text_dim"
+                    android:textSize="13sp"
+                    android:lineSpacingExtra="2dp"
+                    android:fontFamily="monospace"
+                    android:paddingBottom="12dp" />
+                <TextView
                     android:id="@+id/btnClearCache"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="🗑 Очистить кэш"
                     android:textColor="@color/text"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:padding="16dp"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:background="@drawable/tile_selector"
+                    android:layout_marginBottom="8dp" />
+                <TextView
+                    android:id="@+id/btnFullReset"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⚠️ Полный сброс (всё)"
+                    android:textColor="#FFFF6B6B"
                     android:textSize="16sp"
                     android:textStyle="bold"
                     android:padding="16dp"

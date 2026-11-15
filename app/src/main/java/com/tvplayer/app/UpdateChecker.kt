@@ -15,11 +15,9 @@ object UpdateChecker {
         try {
             val repo = BuildConfig.GITHUB_REPO
             if (repo.isBlank() || repo.contains("user/")) return@withContext null
-            CrashLogger.info("OTA", "→ Проверка обновлений (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
+            CrashLogger.info("OTA", "→ Проверка (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
             val url = "https://api.github.com/repos/$repo/releases/latest"
-            val client = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS).build()
+            val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
             val req = Request.Builder().url(url)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "TVPlayer").build()
@@ -33,28 +31,26 @@ object UpdateChecker {
                 val tag = json.optString("tag_name").removePrefix("v")
                 val newVersion = tag.toIntOrNull() ?: 0
                 if (newVersion <= BuildConfig.VERSION_CODE) {
-                    CrashLogger.info("OTA", "✓ Установлена последняя версия (v${BuildConfig.VERSION_CODE})")
+                    CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})")
                     return@withContext null
                 }
                 val assets = json.optJSONArray("assets") ?: return@withContext null
                 if (assets.length() == 0) return@withContext null
                 val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
                 if (apkUrl.isBlank()) return@withContext null
-                CrashLogger.info("OTA", "🎉 Доступно обновление v$newVersion")
-                UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия приложения"))
+                CrashLogger.info("OTA", "🎉 Доступно v$newVersion")
+                UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия"))
             }
         } catch (e: Exception) {
-            CrashLogger.error("OTA", "Ошибка проверки обновлений", e)
+            CrashLogger.error("OTA", "Ошибка проверки", e)
             null
         }
     }
 
     suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
         try {
-            CrashLogger.info("OTA", "→ Скачивание APK: $url")
-            val client = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS).build()
+            CrashLogger.info("OTA", "→ Скачивание APK")
+            val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
             val req = Request.Builder().url(url).build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
@@ -69,7 +65,7 @@ object UpdateChecker {
                 file
             }
         } catch (e: Exception) {
-            CrashLogger.error("OTA", "Ошибка скачивания APK", e)
+            CrashLogger.error("OTA", "Ошибка скачивания", e)
             null
         }
     }

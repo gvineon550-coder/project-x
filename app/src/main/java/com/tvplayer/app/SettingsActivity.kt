@@ -26,28 +26,26 @@ class SettingsActivity : AppCompatActivity() {
 
         b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
         b.txtAbout.text = """
-            Лёгкое и быстрое приложение для просмотра телеканалов VK Live на телефоне и ТВ-приставке.
+            Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
             
             🎯 ВОЗМОЖНОСТИ:
-            • Просмотр каналов VK Live в высоком качестве
-            • Автоматическая подгрузка списка каналов
-            • Выбор качества видео и формата экрана
+            • Просмотр VK Live в высоком качестве
+            • Автоподгрузка списка каналов
+            • Выбор качества и формата экрана
             • Избранное (долгое нажатие ОК)
-            • Переключение каналов пультом вверх/вниз
-            • Панель каналов прямо в плеере (нажатие ОК)
-            • Таймер сна (от 5 минут до 5 часов)
-            • Ручное обновление (кнопка ⬇️ на главном экране)
-            • Умное кэширование и автоочистка
-            • Подробный лог всех операций
+            • Переключение пультом вверх/вниз
+            • Панель каналов в плеере (ОК)
+            • Таймер сна (5м – 5ч)
+            • Ручное обновление (⬇️ в шапке)
+            • Умное кэширование + автоочистка
+            • Подробный лог
             
             ⚙️ ТЕХНОЛОГИИ:
             • Резолвер: yt-dlp (Python + Chaquopy)
-            • Плеер: AndroidX Media3 (ExoPlayer)
-            • Сборка: GitHub Actions (CI/CD)
+            • Плеер: Media3 (ExoPlayer)
+            • Сборка: GitHub Actions
             
-            🔄 Обновления: при выходе новой версии нажмите ⬇️ в шапке главного экрана.
-            
-            ❤️ Сделано с любовью для семьи и друзей.
+            ❤️ Сделано для семьи и друзей.
         """.trimIndent()
 
         updateCacheInfo()
@@ -67,6 +65,15 @@ class SettingsActivity : AppCompatActivity() {
             CrashLogger.info("Settings", "Кэш очищен вручную")
         }
 
+        b.btnFullReset.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Полный сброс")
+                .setMessage("Будут удалены:\n\n• Избранное\n• Последний канал\n• Все кэши\n• Лог\n\nПриложение не удалится. Продолжить?")
+                .setPositiveButton("Сбросить") { _, _ -> performFullReset() }
+                .setNegativeButton("Отмена", null)
+                .show()
+        }
+
         b.btnOpenLog.setOnClickListener {
             val log = CrashLogger.readAll(this)
             AlertDialog.Builder(this)
@@ -81,14 +88,31 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         }
 
-        b.btnShareLog.setOnClickListener {
-            CrashLogger.share(this)
-        }
+        b.btnShareLog.setOnClickListener { CrashLogger.share(this) }
 
         b.btnExitApp.setOnClickListener {
-            CrashLogger.info("Settings", "Полный выход из настроек")
+            CrashLogger.info("Settings", "Полный выход")
             finishAffinity()
             android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
+    private fun performFullReset() {
+        try {
+            getSharedPreferences("tvplayer", MODE_PRIVATE).edit().clear().apply()
+            getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
+            ChannelCache.clear(this)
+            CrashLogger.clear(this)
+            val il = Coil.imageLoader(this)
+            il.diskCache?.clear()
+            il.memoryCache?.clear()
+            cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+            Toast.makeText(this, "Полный сброс выполнен", Toast.LENGTH_SHORT).show()
+            CrashLogger.info("Settings", "Полный сброс: всё очищено")
+            updateCacheInfo()
+        } catch (e: Exception) {
+            CrashLogger.error("Settings", "Ошибка полного сброса", e)
+            Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -103,20 +127,44 @@ class SettingsActivity : AppCompatActivity() {
             } else {
                 b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
                 b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
-                UpdateDialog.show(
-                    this@SettingsActivity,
-                    info.versionCode,
-                    info.changelog,
-                ) { startUpdateDownload(info.downloadUrl) }
+                UpdateDialog.show(this@SettingsActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
             }
         }
     }
 
     private fun updateCacheInfo() {
-        var totalSize = 0L
-        cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
-        val sizeMb = totalSize / 1024f / 1024f
-        b.btnClearCache.text = String.format("🗑 Очистить кэш (%.1f МБ)", sizeMb)
+        try {
+            val imageCacheSize = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val channelsCacheFile = File(filesDir, "channels_cache.json")
+            val channelsCacheSize = if (channelsCacheFile.exists()) channelsCacheFile.length() else 0L
+            val logFile = File(filesDir, "app.log")
+            val logSize = if (logFile.exists()) logFile.length() else 0L
+            val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE)
+            val streamSize = streamPrefs.all.values.sumOf { ((it as? String)?.length ?: 0).toLong() }
+            val totalCache = cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            val pythonSize = totalFiles - channelsCacheSize - logSize
+
+            val stats = buildString {
+                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)}")
+                appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
+                appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)}")
+                appendLine("📝 Лог: ${formatSize(logSize)}")
+                appendLine("🐍 Python: ${formatSize(pythonSize)}")
+                appendLine("📦 Cache всего: ${formatSize(totalCache)}")
+                append("💾 Files всего: ${formatSize(totalFiles)}")
+            }
+            b.txtCacheStats.text = stats
+            b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))
+        } catch (e: Exception) {
+            b.txtCacheStats.text = "Не удалось посчитать: ${e.message}"
+        }
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes Б"
+        bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
+        else -> String.format("%.1f МБ", bytes / 1024f / 1024f)
     }
 
     private fun startUpdateDownload(url: String) {
@@ -133,10 +181,9 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun installApk(file: File) {
         if (!packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
             try {
-                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-                startActivity(intent)
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
             } catch (_: Exception) {}
             return
         }
@@ -147,9 +194,10 @@ class SettingsActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
+            CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
         } catch (e: Exception) {
             CrashLogger.error("OTA", "Ошибка установки", e)
-            Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }

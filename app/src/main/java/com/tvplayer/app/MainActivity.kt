@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.StatFs
 import android.provider.Settings
 import android.view.View
 import android.widget.Toast
@@ -43,10 +44,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
 
-        // Автоочистка кэшей при старте (БЕЗ проверки OTA)
         performStartupCleanup()
 
-        b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить каналы"); loadFromNetwork(forceRefresh = true) }
+        b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
         b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (System.currentTimeMillis() - backPressedTime < 3000) {
-                    CrashLogger.info("Lifecycle", "Полный выход из приложения (двойной BACK)")
+                    CrashLogger.info("Lifecycle", "Полный выход (двойной BACK)")
                     exitApp()
                 } else {
                     Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
@@ -70,7 +70,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         })
 
         loadInitial()
-        // НЕТ автоматической проверки OTA — только по кнопке ⬇️ или в настройках
     }
 
     override fun onResume() {
@@ -91,36 +90,85 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
-    // ═══ СТАРТОВАЯ АВТООЧИСТКА ═══
-    // Чистит: update.apk, просроченные StreamCache, старые файлы в cacheDir
+    // ═══ РАСШИРЕННАЯ АВТООЧИСТКА ═══
     private fun performStartupCleanup() {
         try {
-            // 1. update.apk — 37 МБ после скачивания, больше не нужен
+            // 1. update.apk (после установки больше не нужен)
             val updateApk = File(cacheDir, "update.apk")
             if (updateApk.exists()) {
-                val size = updateApk.length() / 1024 / 1024
+                val sizeMb = updateApk.length() / 1024 / 1024
                 updateApk.delete()
-                CrashLogger.info("Cleanup", "Удалён update.apk ($size МБ)")
+                CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
             }
 
-            // 2. StreamCache — просроченные записи (>2ч)
+            // 2. StreamCache — просроченные
             StreamCache.cleanup(this)
 
-            // 3. cacheDir — если >15 МБ, чистим всё (кроме update.apk, его уже нет)
-            var totalSize = 0L
-            cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
-            if (totalSize > 15 * 1024 * 1024) {
-                val sizeMb = totalSize / 1024 / 1024
-                cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                CrashLogger.info("Cleanup", "cacheDir очищен ($sizeMb МБ)")
+            // 3. Очистка устаревших ключей SharedPreferences (от старой авто-OTA)
+            val staleKeys = listOf("last_ota_check", "last_ota_version")
+            val editor = prefs.edit()
+            var removedKeys = 0
+            staleKeys.forEach { k -> if (prefs.contains(k)) { editor.remove(k); removedKeys++ } }
+            if (removedKeys > 0) {
+                editor.apply()
+                CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
             }
 
-            // 4. Логируем итоговые размеры (для контроля)
-            var filesSize = 0L
-            filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+            // 4. cacheDir — файлы старше 7 дней
+            val sevenDays = 7L * 24 * 60 * 60 * 1000
+            val now = System.currentTimeMillis()
+            var oldRemoved = 0
+            var oldBytes = 0L
+            cacheDir.listFiles()?.forEach { f ->
+                if (f.isFile && (now - f.lastModified()) > sevenDays) {
+                    oldBytes += f.length()
+                    if (f.delete()) oldRemoved++
+                } else if (f.isDirectory) {
+                    f.listFiles()?.forEach { inner ->
+                        if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
+                            oldBytes += inner.length()
+                            if (inner.delete()) oldRemoved++
+                        }
+                    }
+                }
+            }
+            if (oldRemoved > 0) {
+                CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
+            }
+
+            // 5. cacheDir — по общему размеру (>15 МБ)
             var cacheSize = 0L
             cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-            CrashLogger.info("Cleanup", "Размеры: files=${filesSize / 1024}КБ, cache=${cacheSize / 1024}КБ")
+            if (cacheSize > 15 * 1024 * 1024) {
+                val mb = cacheSize / 1024 / 1024
+                cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
+                cacheSize = 0L
+            }
+
+            // 6. Мониторинг filesDir
+            var filesSize = 0L
+            filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+            val filesMb = filesSize / 1024 / 1024
+            if (filesSize > 50 * 1024 * 1024) {
+                CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
+                ChannelCache.clear(this)
+                CrashLogger.clear(this)
+                filesSize = 0L
+                filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+            } else if (filesSize > 30 * 1024 * 1024) {
+                CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
+            }
+
+            // 7. Свободное место
+            val stat = StatFs(filesDir.path)
+            val freeMb = stat.availableBytes / 1024 / 1024
+            if (freeMb < 100) {
+                CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
+            }
+
+            // 8. Итоговые размеры
+            CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
         } catch (e: Exception) {
             CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
         }
@@ -146,7 +194,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private fun loadFromNetwork(forceRefresh: Boolean) {
         if (!NetworkUtils.isOnline(this)) {
-            CrashLogger.info("MainActivity", "Нет интернета — загрузка отменена")
+            CrashLogger.info("MainActivity", "Нет интернета — отмена")
             if (allChannels.isEmpty()) {
                 b.progress.visibility = View.GONE
                 b.recycler.visibility = View.GONE
@@ -170,28 +218,36 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                     val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
                     allChannels = fresh
                     ChannelCache.save(this@MainActivity, fresh)
+
+                    // Синхронизация favorites: удаление мёртвых записей
+                    val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
+                    val actualUrls = fresh.map { it.url }.toSet()
+                    val before = currentFavs.size
+                    currentFavs.retainAll(actualUrls)
+                    if (currentFavs.size < before) {
+                        prefs.edit().putStringSet("favorites", currentFavs).apply()
+                        CrashLogger.info("Favorites", "Удалено ${before - currentFavs.size} мёртвых записей")
+                    }
+
                     if (changed || forceRefresh || b.recycler.adapter == null) {
                         updateView(scrollToLast = forceRefresh)
                     }
                 } else {
-                    val msg = "Не удалось загрузить каналы\n\nВозможно:\n• VK API вернул пустой список\n• Категория изменилась\n\nНажмите для подробностей."
-                    b.error.text = msg
+                    b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."
                     b.error.visibility = View.VISIBLE
-                    CrashLogger.error("MainActivity", "Пустой список каналов после загрузки")
+                    CrashLogger.error("MainActivity", "Пустой список каналов")
                 }
             } catch (e: Exception) {
                 b.progress.visibility = View.GONE
-                val msg = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}\n\nНажмите для подробностей."
-                b.error.text = msg
+                b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"
                 b.error.visibility = View.VISIBLE
                 CrashLogger.error("MainActivity", "Исключение при загрузке", e)
             }
         }
     }
 
-    // ═══ РУЧНАЯ ПРОВЕРКА OTA (по кнопке ⬇️) ═══
     private fun manualCheckForUpdates() {
-        CrashLogger.info("OTA", "→ Ручная проверка (по кнопке)")
+        CrashLogger.info("OTA", "Ручная проверка (кнопка ⬇️)")
         if (!NetworkUtils.isOnline(this)) {
             Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
             return
@@ -200,13 +256,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         lifecycleScope.launch {
             val info = UpdateChecker.checkForUpdate(this@MainActivity)
             if (info == null) {
-                Toast.makeText(this@MainActivity, "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "✅ Последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
             } else {
-                UpdateDialog.show(
-                    this@MainActivity,
-                    info.versionCode,
-                    info.changelog,
-                ) { startUpdateDownload(info.downloadUrl) }
+                UpdateDialog.show(this@MainActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
             }
         }
     }
@@ -236,7 +288,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         lifecycleScope.launch {
             val file = UpdateChecker.downloadApk(this@MainActivity, url)
             if (file == null) {
-                Toast.makeText(this@MainActivity, "Не удалось скачать обновление", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
                 return@launch
             }
             installApk(file)
@@ -245,14 +297,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private fun installApk(file: File) {
         if (!packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
-            CrashLogger.info("OTA", "Нет разрешения на установку — открываем настройки")
+            Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
             try {
-                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-                startActivity(intent)
-            } catch (e: Exception) {
-                CrashLogger.error("OTA", "Не удалось открыть настройки", e)
-            }
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            } catch (_: Exception) {}
             return
         }
         try {
@@ -262,10 +310,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
-            CrashLogger.info("OTA", "Запущена установка APK")
+            CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
         } catch (e: Exception) {
-            CrashLogger.error("OTA", "Ошибка установки APK", e)
-            Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
+            CrashLogger.error("OTA", "Ошибка установки", e)
+            Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -282,7 +330,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b.recycler.visibility = View.VISIBLE
         b.recycler.adapter = ChannelAdapter(displayed, { ch ->
             needScrollOnResume = true
-            CrashLogger.info("UI", "Открытие канала: ${ch.name}")
+            CrashLogger.info("UI", "Открытие: ${ch.name}")
             val intent = Intent(this@MainActivity, PlayerActivity::class.java)
             intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
             intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))

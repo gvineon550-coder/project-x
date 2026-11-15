@@ -108,7 +108,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         b.playerView.resizeMode = currentResizeMode
         b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
-        CrashLogger.info("Player", "Формат изменён на: ${b.btnAspect.text}")
+        CrashLogger.info("Player", "Формат: ${b.btnAspect.text}")
     }
 
     private fun exitApp() {
@@ -158,10 +158,7 @@ class PlayerActivity : AppCompatActivity() {
             }
             else -> null
         }
-        if (nextId != null) {
-            findViewById<View>(nextId)?.requestFocus()
-            return true
-        }
+        if (nextId != null) { findViewById<View>(nextId)?.requestFocus(); return true }
         return false
     }
 
@@ -179,9 +176,7 @@ class PlayerActivity : AppCompatActivity() {
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_BACK -> { hideControlsRunnable.run(); return true }
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                        (currentFocus as? View)?.performClick()
-                        resetHideTimeout()
-                        return true
+                        (currentFocus as? View)?.performClick(); resetHideTimeout(); return true
                     }
                     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
                     KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -235,7 +230,7 @@ class PlayerActivity : AppCompatActivity() {
         getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
         val chNum = currentIndex + 1
         val chName = names.getOrNull(currentIndex) ?: "Канал"
-        CrashLogger.info("Player", "Открытие канала #$chNum: $chName")
+        CrashLogger.info("Player", "Открытие #$chNum: $chName")
         b.channelNameOverlay.text = "$chNum. $chName"
         b.channelNameOverlay.visibility = View.VISIBLE
         handler.removeCallbacks(hideChannelOverlayRunnable)
@@ -244,25 +239,18 @@ class PlayerActivity : AppCompatActivity() {
         retryCount = 0
         val channelUrl = urls.getOrNull(currentIndex) ?: return
         val cached = StreamCache.get(this, channelUrl)
-        if (cached != null) {
-            CrashLogger.info("Player", "Использую кэш ссылки")
-            play(cached)
-            return
-        }
+        if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
         if (!NetworkUtils.isOnline(this)) {
             b.progress.visibility = View.GONE
-            b.errorText.text = "Нет подключения к интернету.\n\nПроверьте Wi-Fi или кабель и нажмите «Повторить»."
+            b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."
             b.errorLayout.visibility = View.VISIBLE
-            CrashLogger.info("Player", "Нет интернета при открытии канала")
+            CrashLogger.info("Player", "Нет интернета")
             return
         }
         b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val direct = StreamResolver.resolve(channelUrl)
-            if (direct.startsWith("ERROR")) {
-                handleError(direct)
-                return@launch
-            }
+            if (direct.startsWith("ERROR")) { handleError(direct); return@launch }
             StreamCache.put(this@PlayerActivity, channelUrl, direct)
             play(direct)
         }
@@ -285,9 +273,9 @@ class PlayerActivity : AppCompatActivity() {
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     super.onPlayerError(error)
-                    CrashLogger.error("Player", "Ошибка воспроизведения: ${error.errorCodeName} (${error.errorCode}) — ${error.message}")
+                    CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})")
                     urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
-                    handleError("Ошибка плеера: ${error.errorCodeName}\n${error.message?.take(200) ?: ""}")
+                    handleError("Ошибка плеера: ${error.errorCodeName}")
                 }
             })
         }
@@ -343,7 +331,7 @@ class PlayerActivity : AppCompatActivity() {
         if (retryCount < MAX_RETRIES) {
             retryCount++
             b.progress.visibility = View.VISIBLE
-            CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES через ${RETRY_DELAY}мс")
+            CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES")
             handler.postDelayed({ startPlayback() }, RETRY_DELAY)
         } else {
             b.progress.visibility = View.GONE
@@ -354,7 +342,7 @@ class PlayerActivity : AppCompatActivity() {
             b.rightControls.visibility = View.GONE
             b.btnSleepTimer.visibility = View.GONE
             b.leftControls.visibility = View.GONE
-            CrashLogger.error("Player", "Все $MAX_RETRIES попыток исчерпаны")
+            CrashLogger.error("Player", "Все попытки исчерпаны")
         }
     }
 
@@ -369,7 +357,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun startSleepTimer(minutes: Int) {
         sleepTimer?.cancel()
-        CrashLogger.info("Player", "Таймер сна установлен на $minutes минут")
+        CrashLogger.info("Player", "Сон: $minutes мин")
         val millis = minutes * 60 * 1000L
         sleepTimer = object : CountDownTimer(millis, 1000) {
             override fun onTick(millisUntilFinished: Long) {
@@ -377,7 +365,7 @@ class PlayerActivity : AppCompatActivity() {
                 b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
             }
             override fun onFinish() {
-                CrashLogger.info("Player", "Таймер сна сработал — выключаюсь")
+                CrashLogger.info("Player", "Таймер сработал — выключение")
                 exitApp()
             }
         }.start()
@@ -397,7 +385,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        CrashLogger.info("Player", "Закрытие плеера")
+        CrashLogger.info("Player", "Закрытие")
         handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
     }
 }

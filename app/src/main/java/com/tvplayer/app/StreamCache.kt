@@ -4,6 +4,7 @@ import android.content.Context
 object StreamCache {
     private const val PREFS = "stream_cache"
     private const val TTL_MS = 2 * 60 * 60 * 1000L  // 2 часа
+    private const val MAX_ENTRIES = 200             // жёсткий лимит
 
     fun get(context: Context, channelUrl: String): String? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -21,6 +22,25 @@ object StreamCache {
 
     fun put(context: Context, channelUrl: String, m3u8: String) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val all = prefs.all
+        // Эвикция старых записей, если превышен лимит
+        if (all.size >= MAX_ENTRIES) {
+            val entries = all.entries
+                .filter { it.value is String }
+                .map { e ->
+                    val parts = (e.value as String).split("|")
+                    val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
+                    e.key to ts
+                }
+                .sortedBy { it.second }
+                .take(maxOf(1, all.size - MAX_ENTRIES + 1))
+            val editor = prefs.edit()
+            entries.forEach { editor.remove(it.first) }
+            editor.apply()
+            if (entries.isNotEmpty()) {
+                CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
+            }
+        }
         prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
     }
 
@@ -34,7 +54,6 @@ object StreamCache {
         prefs.edit().clear().apply()
     }
 
-    // Очищает все просроченные записи (старше TTL). Вызывается при старте приложения.
     fun cleanup(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val all = prefs.all
@@ -58,6 +77,6 @@ object StreamCache {
             }
         }
         editor.apply()
-        if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных записей")
+        if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных")
     }
 }

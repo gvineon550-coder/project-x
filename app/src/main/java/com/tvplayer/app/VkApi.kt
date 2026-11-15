@@ -24,7 +24,7 @@ suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channe
                 .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
             client.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер ответа: ${body.length} байт")
+                CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер: ${body.length} байт")
                 if (resp.isSuccessful && body.isNotBlank()) {
                     val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
                     if (streams != null) for (i in 0 until streams.length()) {
