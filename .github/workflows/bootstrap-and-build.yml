@@ -49,7 +49,7 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      - name: "📦 Манифест, иконки, сплэш, фоны, layout обновлений"
+      - name: "📦 Манифест, иконки, сплэш, фоны, layout"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           pip install --quiet Pillow
@@ -395,13 +395,25 @@ jobs:
                       android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
                   <TextView
+                      android:id="@+id/btnCheckUpdates"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="⬇️"
+                      android:textColor="@color/text_dim"
+                      android:textSize="22sp"
+                      android:paddingHorizontal="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:contentDescription="Проверить обновления"
+                      android:background="?attr/selectableItemBackground" />
+                  <TextView
                       android:id="@+id/btnSettings"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
                       android:text="⚙"
                       android:textColor="@color/text_dim"
                       android:textSize="22sp"
-                      android:paddingHorizontal="16dp"
+                      android:paddingHorizontal="12dp"
                       android:focusable="true"
                       android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
@@ -946,7 +958,7 @@ jobs:
                   return ""
           EOF
 
-      - name: "📝 CrashLogger + TVPlayerApp"
+      - name: "📝 CrashLogger + TVPlayerApp + UpdateDialog"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/CrashLogger.kt << 'EOF'
@@ -1076,7 +1088,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 Kotlin Core"
+      - name: "🧠 Kotlin Core (VkApi, StreamCache с cleanup, ChannelCache)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
@@ -1255,12 +1267,15 @@ jobs:
           }
           EOF
 
+          # StreamCache с cleanup() — чистит просроченные при старте
           cat > app/src/main/java/com/tvplayer/app/StreamCache.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
+
           object StreamCache {
               private const val PREFS = "stream_cache"
-              private const val TTL_MS = 2 * 60 * 60 * 1000L
+              private const val TTL_MS = 2 * 60 * 60 * 1000L  // 2 часа
+
               fun get(context: Context, channelUrl: String): String? {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val entry = prefs.getString(channelUrl, null) ?: return null
@@ -1274,17 +1289,47 @@ jobs:
                   }
                   return url
               }
+
               fun put(context: Context, channelUrl: String, m3u8: String) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
               }
+
               fun invalidate(context: Context, channelUrl: String) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   prefs.edit().remove(channelUrl).apply()
               }
+
               fun clearAll(context: Context) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   prefs.edit().clear().apply()
+              }
+
+              // Очищает все просроченные записи (старше TTL). Вызывается при старте приложения.
+              fun cleanup(context: Context) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val all = prefs.all
+                  if (all.isEmpty()) return
+                  val editor = prefs.edit()
+                  var removed = 0
+                  val now = System.currentTimeMillis()
+                  for ((key, value) in all) {
+                      if (value is String) {
+                          val parts = value.split("|")
+                          if (parts.size != 2) {
+                              editor.remove(key); removed++
+                          } else {
+                              val ts = parts[1].toLongOrNull() ?: 0L
+                              if (now - ts > TTL_MS) {
+                                  editor.remove(key); removed++
+                              }
+                          }
+                      } else {
+                          editor.remove(key); removed++
+                      }
+                  }
+                  editor.apply()
+                  if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных записей")
               }
           }
           EOF
@@ -1422,7 +1467,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 MainActivity (@Volatile сессионный флаг)"
+      - name: "🧠 MainActivity (ручная OTA + автоочистка)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1459,12 +1504,6 @@ jobs:
               private var backPressedTime: Long = 0
               private var needScrollOnResume = false
 
-              companion object {
-                  // ⚡ Живёт в памяти JVM-процесса, не сбрасывается при пересоздании Activity.
-                  // Гарантирует: 1 проверка OTA на запуск приложения.
-                  @Volatile private var otaCheckedThisSession = false
-              }
-
               override fun newImageLoader(): ImageLoader {
                   return ImageLoader.Builder(this)
                       .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
@@ -1476,12 +1515,18 @@ jobs:
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
-                  autoCleanCache()
-                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+
+                  // Автоочистка кэшей при старте (БЕЗ проверки OTA)
+                  performStartupCleanup()
+
+                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить каналы"); loadFromNetwork(forceRefresh = true) }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
                   b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+                  b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
+
                   b.btnFavFilter.nextFocusDownId = R.id.recycler
                   b.btnRefresh.nextFocusDownId = R.id.recycler
+                  b.btnCheckUpdates.nextFocusDownId = R.id.recycler
                   b.btnSettings.nextFocusDownId = R.id.recycler
                   b.error.setOnClickListener { showLogDialog() }
 
@@ -1498,7 +1543,7 @@ jobs:
                   })
 
                   loadInitial()
-                  checkForUpdates()
+                  // НЕТ автоматической проверки OTA — только по кнопке ⬇️ или в настройках
               }
 
               override fun onResume() {
@@ -1516,6 +1561,41 @@ jobs:
                       b.recycler.postDelayed({
                           b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus()
                       }, 100)
+                  }
+              }
+
+              // ═══ СТАРТОВАЯ АВТООЧИСТКА ═══
+              // Чистит: update.apk, просроченные StreamCache, старые файлы в cacheDir
+              private fun performStartupCleanup() {
+                  try {
+                      // 1. update.apk — 37 МБ после скачивания, больше не нужен
+                      val updateApk = File(cacheDir, "update.apk")
+                      if (updateApk.exists()) {
+                          val size = updateApk.length() / 1024 / 1024
+                          updateApk.delete()
+                          CrashLogger.info("Cleanup", "Удалён update.apk ($size МБ)")
+                      }
+
+                      // 2. StreamCache — просроченные записи (>2ч)
+                      StreamCache.cleanup(this)
+
+                      // 3. cacheDir — если >15 МБ, чистим всё (кроме update.apk, его уже нет)
+                      var totalSize = 0L
+                      cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
+                      if (totalSize > 15 * 1024 * 1024) {
+                          val sizeMb = totalSize / 1024 / 1024
+                          cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                          CrashLogger.info("Cleanup", "cacheDir очищен ($sizeMb МБ)")
+                      }
+
+                      // 4. Логируем итоговые размеры (для контроля)
+                      var filesSize = 0L
+                      filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      var cacheSize = 0L
+                      cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
+                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize / 1024}КБ, cache=${cacheSize / 1024}КБ")
+                  } catch (e: Exception) {
+                      CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
                   }
               }
 
@@ -1582,6 +1662,28 @@ jobs:
                   }
               }
 
+              // ═══ РУЧНАЯ ПРОВЕРКА OTA (по кнопке ⬇️) ═══
+              private fun manualCheckForUpdates() {
+                  CrashLogger.info("OTA", "→ Ручная проверка (по кнопке)")
+                  if (!NetworkUtils.isOnline(this)) {
+                      Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  Toast.makeText(this, "Проверка обновлений...", Toast.LENGTH_SHORT).show()
+                  lifecycleScope.launch {
+                      val info = UpdateChecker.checkForUpdate(this@MainActivity)
+                      if (info == null) {
+                          Toast.makeText(this@MainActivity, "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
+                      } else {
+                          UpdateDialog.show(
+                              this@MainActivity,
+                              info.versionCode,
+                              info.changelog,
+                          ) { startUpdateDownload(info.downloadUrl) }
+                      }
+                  }
+              }
+
               private fun showLogDialog() {
                   val log = CrashLogger.readAll(this)
                   AlertDialog.Builder(this)
@@ -1597,58 +1699,9 @@ jobs:
                       .show()
               }
 
-              private fun autoCleanCache() {
-                  var totalSize = 0L
-                  cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
-                  if (totalSize > 15 * 1024 * 1024) {
-                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                      CrashLogger.info("MainActivity", "Автоочистка кэша картинок")
-                  }
-              }
-
               private fun exitApp() {
                   finishAffinity()
                   android.os.Process.killProcess(android.os.Process.myPid())
-              }
-
-              // ═══ OTA-ЗАЩИТА (план А): @Volatile флаг в companion object ═══
-              private fun checkForUpdates() {
-                  // Уровень 1: сессионный флаг — НЕ сбрасывается при пересоздании Activity
-                  if (otaCheckedThisSession) {
-                      CrashLogger.info("OTA", "Пропуск (уже проверяли в этой сессии)")
-                      return
-                  }
-
-                  val currentVersion = BuildConfig.VERSION_CODE
-                  val lastVersion = prefs.getInt("last_ota_version", 0)
-                  val lastCheck = prefs.getLong("last_ota_check", 0L)
-                  val sinceLast = System.currentTimeMillis() - lastCheck
-
-                  CrashLogger.info("OTA", "Debug: current=v$currentVersion, lastChecked=v$lastVersion, sinceLast=${sinceLast / 60000}мин")
-
-                  // Уровень 2: prefs — 6 часов между разными запусками приложения
-                  if (lastCheck != 0L && lastVersion == currentVersion && sinceLast < 6 * 60 * 60 * 1000L) {
-                      otaCheckedThisSession = true
-                      CrashLogger.info("OTA", "Пропуск (v$currentVersion, ${sinceLast / 60000}мин назад)")
-                      return
-                  }
-
-                  // Оба уровня пройдены — запускаем и ставим флаг СРАЗУ
-                  otaCheckedThisSession = true
-                  prefs.edit()
-                      .putInt("last_ota_version", currentVersion)
-                      .putLong("last_ota_check", System.currentTimeMillis())
-                      .commit()
-                  CrashLogger.info("OTA", "Запуск проверки (сессия+prefs)")
-
-                  lifecycleScope.launch {
-                      val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
-                      UpdateDialog.show(
-                          this@MainActivity,
-                          info.versionCode,
-                          info.changelog,
-                      ) { startUpdateDownload(info.downloadUrl) }
-                  }
               }
 
               private fun startUpdateDownload(url: String) {
@@ -1773,8 +1826,8 @@ jobs:
                       • Переключение каналов пультом вверх/вниз
                       • Панель каналов прямо в плеере (нажатие ОК)
                       • Таймер сна (от 5 минут до 5 часов)
-                      • Авто-обновление приложения
-                      • Умное кэширование ссылок и очистка кэша
+                      • Ручное обновление (кнопка ⬇️ на главном экране)
+                      • Умное кэширование и автоочистка
                       • Подробный лог всех операций
                       
                       ⚙️ ТЕХНОЛОГИИ:
@@ -1782,7 +1835,7 @@ jobs:
                       • Плеер: AndroidX Media3 (ExoPlayer)
                       • Сборка: GitHub Actions (CI/CD)
                       
-                      🔄 Обновления выходят автоматически. При запуске приложение само проверяет наличие новой версии и предлагает обновиться.
+                      🔄 Обновления: при выходе новой версии нажмите ⬇️ в шапке главного экрана.
                       
                       ❤️ Сделано с любовью для семьи и друзей.
                   """.trimIndent()
@@ -1790,8 +1843,7 @@ jobs:
                   updateCacheInfo()
 
                   b.btnBack.setOnClickListener { finish() }
-                  checkUpdate(silent = true)
-                  b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
+                  b.btnCheckUpdate.setOnClickListener { checkUpdate() }
 
                   b.btnClearCache.setOnClickListener {
                       val imageLoader = Coil.imageLoader(this)
@@ -1830,7 +1882,7 @@ jobs:
                   }
               }
 
-              private fun checkUpdate(silent: Boolean) {
+              private fun checkUpdate() {
                   b.txtStatus.text = "⏳ Проверка обновлений..."
                   b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
                   lifecycleScope.launch {
@@ -1838,7 +1890,6 @@ jobs:
                       if (info == null) {
                           b.txtStatus.text = "✅ У вас актуальная версия"
                           b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80"))
-                          if (!silent) Toast.makeText(this@SettingsActivity, "Обновлений нет", Toast.LENGTH_SHORT).show()
                       } else {
                           b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
                           b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
@@ -2308,7 +2359,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "fix: OTA @Volatile session flag in workflow (single check per process)" || echo "no changes"
+          git commit -m "feat: manual-only OTA + aggressive cache cleanup" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2345,21 +2396,20 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛠 **Финальный OTA-фикс (в workflow):**
+            🎯 **Финальное закрытие OTA + кэш:**
 
-            - **`@Volatile` флаг в `companion object`** — гарантирует 1 проверку OTA на запуск процесса. Переживает пересоздание Activity.
-            - **prefs** — 6 часов между разными запусками приложения.
-            - **Debug-лог** — увидим, что происходит.
+            **OTA — только вручную:**
+            - Убрана автоматическая проверка при запуске (никаких тройных проверок физически невозможно).
+            - В шапке главного экрана — **новая кнопка «⬇️»** для ручной проверки.
+            - В настройках — кнопка «🔄 Проверить обновления» (работает как раньше).
+            - Нет интернета — при нажатии «⬇️» покажет «Нет подключения».
 
-            **Ожидаемый лог:**
-            ```
-            [OTA] Debug: current=v33, lastChecked=v32, sinceLast=Xмин
-            [OTA] Запуск проверки (сессия+prefs)        ← 1-й вызов
-            [OTA] → Проверка обновлений
-            [OTA] ✓ Установлена последняя версия
-            [OTA] Пропуск (уже проверяли в этой сессии)  ← 2-й вызов
-            [OTA] Пропуск (уже проверяли в этой сессии)  ← 3-й вызов
-            ```
+            **Автоочистка кэша при старте:**
+            - **`update.apk`** (37 МБ после скачивания) → **удаляется**.
+            - **`StreamCache`** → удаляются просроченные записи (старше 2 часов).
+            - **`cacheDir`** → если >15 МБ, чистится.
+            - **`app.log`** → ротация при >500 КБ (было раньше).
+            - В лог пишется: `Размеры: files=XКБ, cache=YКБ` — для контроля.
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
