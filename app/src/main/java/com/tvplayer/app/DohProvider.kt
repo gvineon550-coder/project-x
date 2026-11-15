@@ -11,23 +11,29 @@ import java.net.UnknownHostException
 
 object DohProvider {
     private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
+    private const val TEST_DOMAIN = "example.com"
 
-    /**
-     * Возвращает кастомный Dns с фолбэком на Dns.SYSTEM.
-     * Если DoH недоступен/не ответил — происходит автоматический
-     * откат на системный DNS (без DoH).
-     */
+    @Volatile private var cached: Dns? = null
+
     fun createWithFallback(context: Context): Dns {
+        cached?.let { return it }
+        synchronized(this) {
+            cached?.let { return it }
+            val created = build(context.applicationContext)
+            cached = created
+            return created
+        }
+    }
+
+    private fun build(context: Context): Dns {
         val httpClient = OkHttpClient.Builder().build()
         val doh = try {
-            // Bootstrap-клиент с кэшем (10 МБ) — чтобы DoH-запросы кэшировались
             val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
             val bootstrapClient = httpClient.newBuilder().cache(cache).build()
-
             DnsOverHttps.Builder()
                 .client(bootstrapClient)
                 .url(DOH_URL.toHttpUrl())
-                .includeIPv6(false) // IPv4 безопаснее и стабильнее на Android TV
+                .includeIPv6(false)
                 .build()
         } catch (e: Exception) {
             CrashLogger.error("DoH", "Не удалось создать DoH — используем системный DNS", e)
@@ -39,18 +45,12 @@ object DohProvider {
                 if (doh != null) {
                     try {
                         val result = doh.lookup(hostname)
-                        if (result.isNotEmpty()) {
-                            // DoH сработал
-                            return result
-                        }
-                        // Пустой результат — AdGuard заблокировал или не ответил
+                        if (result.isNotEmpty()) return result
                         CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
                     } catch (e: Exception) {
-                        // Ошибка DoH (таймаут, нет сети, сертификат и т.д.)
                         CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк на системный DNS")
                     }
                 }
-                // ФОЛБЭК: системный DNS, если DoH нет или он не сработал
                 return try {
                     Dns.SYSTEM.lookup(hostname)
                 } catch (e: UnknownHostException) {
@@ -61,21 +61,26 @@ object DohProvider {
         }
     }
 
-    /**
-     * Проверка работоспособности DoH.
-     * Возвращает true, если AdGuard DNS резолвит домен (любой),
-     * и false — если DoH не отвечает.
-     */
     fun testDoh(context: Context): Boolean {
         return try {
-            val dns = createWithFallback(context)
-            // Пробуем резолвить заведомо существующий домен через DoH
-            val result = dns.lookup("dns.adguard-dns.com")
-            val ok = result.isNotEmpty()
-            CrashLogger.info("DoH", if (ok) "✅ DoH работает" else "⚠️ DoH вернул пустой результат")
-            ok
+            val client = OkHttpClient.Builder().build()
+            val doh = DnsOverHttps.Builder()
+                .client(client)
+                .url(DOH_URL.toHttpUrl())
+                .includeIPv6(false)
+                .build()
+            val started = System.currentTimeMillis()
+            val result = doh.lookup(TEST_DOMAIN)
+            val elapsed = System.currentTimeMillis() - started
+            if (result.isNotEmpty()) {
+                CrashLogger.info("DoH", "✅ DoH AdGuard работает ($TEST_DOMAIN → ${result.first().hostAddress}, ${elapsed}мс)")
+                true
+            } else {
+                CrashLogger.info("DoH", "⚠️ DoH AdGuard вернул пустой ответ для $TEST_DOMAIN (${elapsed}мс)")
+                false
+            }
         } catch (e: Exception) {
-            CrashLogger.error("DoH", "❌ DoH тест провален", e)
+            CrashLogger.error("DoH", "❌ DoH AdGuard не работает: ${e.javaClass.simpleName}: ${e.message}", e)
             false
         }
     }

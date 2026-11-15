@@ -1,7 +1,95 @@
-import yt_dlp
-import urllib.request
-import re
 import socket
+import time
+import urllib.request
+
+DOH_URL = "https://dns.adguard-dns.com/dns-query"
+DOH_HOSTS = {"dns.adguard-dns.com", "dns.google", "cloudflare-dns.com", "dns.quad9.net"}
+DOH_TIMEOUT = 2
+DNS_CACHE = {}
+DNS_TTL = 300
+_doh_fail_until = 0.0
+_doh_consecutive_fails = 0
+_DOH_MAX_FAILS = 3
+_DOH_COOLDOWN = 60
+
+try:
+    import dns.message
+    import dns.rdatatype
+    _DNS_AVAILABLE = True
+except Exception:
+    _DNS_AVAILABLE = False
+
+_orig_getaddrinfo = socket.getaddrinfo
+
+def _doh_lookup(host, timeout=DOH_TIMEOUT):
+    q = dns.message.make_query(host, dns.rdatatype.A)
+    req = urllib.request.Request(
+        DOH_URL,
+        data=q.to_wire(),
+        headers={
+            "Content-Type": "application/dns-message",
+            "Accept": "application/dns-message",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        wire = resp.read()
+    msg = dns.message.from_wire(wire)
+    ips = []
+    if msg.answer:
+        for rrset in msg.answer:
+            for rr in rrset:
+                ips.append(str(rr))
+    return ips
+
+def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    global _doh_fail_until, _doh_consecutive_fails
+    if not _DNS_AVAILABLE or host in DOH_HOSTS:
+        return _orig_getaddrinfo(host, port, family, type, proto, flags)
+    if family not in (0, socket.AF_INET):
+        return _orig_getaddrinfo(host, port, family, type, proto, flags)
+    if time.time() < _doh_fail_until:
+        return _orig_getaddrinfo(host, port, family, type, proto, flags)
+    now = time.time()
+    cached = DNS_CACHE.get(host)
+    if cached and (now - cached[1]) < DNS_TTL:
+        ips = cached[0]
+    else:
+        try:
+            ips = _doh_lookup(host)
+            if not ips:
+                _doh_consecutive_fails = 0
+                return _orig_getaddrinfo(host, port, family, type, proto, flags)
+            DNS_CACHE[host] = (ips, now)
+            _doh_consecutive_fails = 0
+        except Exception:
+            _doh_consecutive_fails += 1
+            if _doh_consecutive_fails >= _DOH_MAX_FAILS:
+                _doh_fail_until = time.time() + _DOH_COOLDOWN
+            return _orig_getaddrinfo(host, port, family, type, proto, flags)
+    result = []
+    for ip in ips:
+        try:
+            result.append((socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port)))
+        except Exception:
+            pass
+    if not result:
+        return _orig_getaddrinfo(host, port, family, type, proto, flags)
+    return result
+
+socket.getaddrinfo = _doh_getaddrinfo
+
+def doh_health():
+    return {
+        "available": _DNS_AVAILABLE,
+        "consecutive_fails": _doh_consecutive_fails,
+        "cooldown_active": time.time() < _doh_fail_until,
+        "cooldown_remaining": max(0, int(_doh_fail_until - time.time())),
+        "cache_size": len(DNS_CACHE),
+    }
+
+import yt_dlp
+import re
 socket.setdefaulttimeout(15)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

@@ -2763,7 +2763,7 @@ jobs:
           EOF
 
           RUN_NUMBER="${{ github.run_number }}"
-          sed -i "s/versionCode = 39[0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
+          sed -i "s/versionCode = 40[0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A

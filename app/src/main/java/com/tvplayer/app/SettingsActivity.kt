@@ -40,7 +40,8 @@ class SettingsActivity : AppCompatActivity() {
             • Таймер сна (5м – 5ч)
             • Ручное обновление (⬇️ в шапке)
             • Умное кэширование + автоочистка
-            • DNS-over-HTTPS (AdGuard) с фолбэком
+            • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
+            • Pre-flight проверка DoH при старте
             • Подробный лог
             
             ⚙️ ТЕХНОЛОГИИ:

@@ -21,8 +21,10 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import com.tvplayer.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var b: ActivityMainBinding
@@ -33,7 +35,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var needScrollOnResume = false
 
     override fun newImageLoader(): ImageLoader {
+        val dohOkHttp = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .dns(DohProvider.createWithFallback(this))
+            .build()
         return ImageLoader.Builder(this)
+            .okHttpClient(dohOkHttp)
             .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
             .build()
     }

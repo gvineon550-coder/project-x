@@ -22,7 +22,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -324,14 +323,13 @@ class PlayerActivity : AppCompatActivity() {
         val tracks = p.currentTracks
         val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
         val qualities = mutableListOf<String>(); qualities.add("Авто (Auto)")
-        val formats = mutableListOf<androidx.media3.common.Format>()
         var selectedTrackIndex = -1
         for (i in 0 until videoGroup.length) { if (videoGroup.isTrackSelected(i)) { selectedTrackIndex = i; break } }
         for (i in 0 until videoGroup.length) {
             val format = videoGroup.getTrackFormat(i)
             val prefix = if (i == selectedTrackIndex) "▶ " else "   "
             val text = if (format.height > 0) "${prefix}${format.height}p (${format.bitrate / 1000} kbps)" else "${prefix}Track $i"
-            qualities.add(text); formats.add(format)
+            qualities.add(text)
         }
         AlertDialog.Builder(this).setTitle("Качество видео").setItems(qualities.toTypedArray()) { _, which ->
             if (which == 0) trackSelector.parameters = trackSelector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO).setAllowVideoMixedMimeTypeAdaptiveness(true).build()
