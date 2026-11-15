@@ -88,7 +88,6 @@ jobs:
               draw.polygon([(tx, ty), (tx, ty + size // 3), (tx + size // 3, size // 2)], fill=(255, 255, 255, 255))
               img.save(f'{folder}/ic_launcher.png')
               img.save(f'{folder}/ic_launcher_round.png')
-          print("✅ PNG-иконки сгенерированы")
           PYEOF
 
           cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
@@ -573,11 +572,34 @@ jobs:
                               android:letterSpacing="0.1"
                               android:paddingBottom="12dp" />
                           <TextView
+                              android:id="@+id/txtCacheStats"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="Подсчёт..."
+                              android:textColor="@color/text_dim"
+                              android:textSize="13sp"
+                              android:lineSpacingExtra="2dp"
+                              android:fontFamily="monospace"
+                              android:paddingBottom="12dp" />
+                          <TextView
                               android:id="@+id/btnClearCache"
                               android:layout_width="match_parent"
                               android:layout_height="wrap_content"
                               android:text="🗑 Очистить кэш"
                               android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector"
+                              android:layout_marginBottom="8dp" />
+                          <TextView
+                              android:id="@+id/btnFullReset"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="⚠️ Полный сброс (всё)"
+                              android:textColor="#FFFF6B6B"
                               android:textSize="16sp"
                               android:textStyle="bold"
                               android:padding="16dp"
@@ -1088,7 +1110,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 Kotlin Core (VkApi, StreamCache с cleanup, ChannelCache)"
+      - name: "🧠 Kotlin Core (VkApi, StreamCache с лимитом, ChannelCache)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
@@ -1118,7 +1140,7 @@ jobs:
                           .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
                       client.newCall(req).execute().use { resp ->
                           val body = resp.body?.string().orEmpty()
-                          CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер ответа: ${body.length} байт")
+                          CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер: ${body.length} байт")
                           if (resp.isSuccessful && body.isNotBlank()) {
                               val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
                               if (streams != null) for (i in 0 until streams.length()) {
@@ -1267,7 +1289,6 @@ jobs:
           }
           EOF
 
-          # StreamCache с cleanup() — чистит просроченные при старте
           cat > app/src/main/java/com/tvplayer/app/StreamCache.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
@@ -1275,6 +1296,7 @@ jobs:
           object StreamCache {
               private const val PREFS = "stream_cache"
               private const val TTL_MS = 2 * 60 * 60 * 1000L  // 2 часа
+              private const val MAX_ENTRIES = 200             // жёсткий лимит
 
               fun get(context: Context, channelUrl: String): String? {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -1292,6 +1314,25 @@ jobs:
 
               fun put(context: Context, channelUrl: String, m3u8: String) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val all = prefs.all
+                  // Эвикция старых записей, если превышен лимит
+                  if (all.size >= MAX_ENTRIES) {
+                      val entries = all.entries
+                          .filter { it.value is String }
+                          .map { e ->
+                              val parts = (e.value as String).split("|")
+                              val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
+                              e.key to ts
+                          }
+                          .sortedBy { it.second }
+                          .take(maxOf(1, all.size - MAX_ENTRIES + 1))
+                      val editor = prefs.edit()
+                      entries.forEach { editor.remove(it.first) }
+                      editor.apply()
+                      if (entries.isNotEmpty()) {
+                          CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
+                      }
+                  }
                   prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
               }
 
@@ -1305,7 +1346,6 @@ jobs:
                   prefs.edit().clear().apply()
               }
 
-              // Очищает все просроченные записи (старше TTL). Вызывается при старте приложения.
               fun cleanup(context: Context) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val all = prefs.all
@@ -1329,7 +1369,7 @@ jobs:
                       }
                   }
                   editor.apply()
-                  if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных записей")
+                  if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных")
               }
           }
           EOF
@@ -1406,11 +1446,9 @@ jobs:
                   try {
                       val repo = BuildConfig.GITHUB_REPO
                       if (repo.isBlank() || repo.contains("user/")) return@withContext null
-                      CrashLogger.info("OTA", "→ Проверка обновлений (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
+                      CrashLogger.info("OTA", "→ Проверка (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
                       val url = "https://api.github.com/repos/$repo/releases/latest"
-                      val client = OkHttpClient.Builder()
-                          .connectTimeout(10, TimeUnit.SECONDS)
-                          .readTimeout(15, TimeUnit.SECONDS).build()
+                      val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
                       val req = Request.Builder().url(url)
                           .header("Accept", "application/vnd.github+json")
                           .header("User-Agent", "TVPlayer").build()
@@ -1424,28 +1462,26 @@ jobs:
                           val tag = json.optString("tag_name").removePrefix("v")
                           val newVersion = tag.toIntOrNull() ?: 0
                           if (newVersion <= BuildConfig.VERSION_CODE) {
-                              CrashLogger.info("OTA", "✓ Установлена последняя версия (v${BuildConfig.VERSION_CODE})")
+                              CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})")
                               return@withContext null
                           }
                           val assets = json.optJSONArray("assets") ?: return@withContext null
                           if (assets.length() == 0) return@withContext null
                           val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
                           if (apkUrl.isBlank()) return@withContext null
-                          CrashLogger.info("OTA", "🎉 Доступно обновление v$newVersion")
-                          UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия приложения"))
+                          CrashLogger.info("OTA", "🎉 Доступно v$newVersion")
+                          UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия"))
                       }
                   } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка проверки обновлений", e)
+                      CrashLogger.error("OTA", "Ошибка проверки", e)
                       null
                   }
               }
 
               suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
                   try {
-                      CrashLogger.info("OTA", "→ Скачивание APK: $url")
-                      val client = OkHttpClient.Builder()
-                          .connectTimeout(30, TimeUnit.SECONDS)
-                          .readTimeout(120, TimeUnit.SECONDS).build()
+                      CrashLogger.info("OTA", "→ Скачивание APK")
+                      val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
                       val req = Request.Builder().url(url).build()
                       client.newCall(req).execute().use { resp ->
                           if (!resp.isSuccessful) {
@@ -1460,14 +1496,14 @@ jobs:
                           file
                       }
                   } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка скачивания APK", e)
+                      CrashLogger.error("OTA", "Ошибка скачивания", e)
                       null
                   }
               }
           }
           EOF
 
-      - name: "🧠 MainActivity (ручная OTA + автоочистка)"
+      - name: "🧠 MainActivity (ручная OTA + расширенная автоочистка + favorites)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1479,6 +1515,7 @@ jobs:
           import android.content.Intent
           import android.net.Uri
           import android.os.Bundle
+          import android.os.StatFs
           import android.provider.Settings
           import android.view.View
           import android.widget.Toast
@@ -1516,10 +1553,9 @@ jobs:
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
 
-                  // Автоочистка кэшей при старте (БЕЗ проверки OTA)
                   performStartupCleanup()
 
-                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить каналы"); loadFromNetwork(forceRefresh = true) }
+                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
                   b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
                   b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
@@ -1533,7 +1569,7 @@ jobs:
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() {
                           if (System.currentTimeMillis() - backPressedTime < 3000) {
-                              CrashLogger.info("Lifecycle", "Полный выход из приложения (двойной BACK)")
+                              CrashLogger.info("Lifecycle", "Полный выход (двойной BACK)")
                               exitApp()
                           } else {
                               Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
@@ -1543,7 +1579,6 @@ jobs:
                   })
 
                   loadInitial()
-                  // НЕТ автоматической проверки OTA — только по кнопке ⬇️ или в настройках
               }
 
               override fun onResume() {
@@ -1564,36 +1599,85 @@ jobs:
                   }
               }
 
-              // ═══ СТАРТОВАЯ АВТООЧИСТКА ═══
-              // Чистит: update.apk, просроченные StreamCache, старые файлы в cacheDir
+              // ═══ РАСШИРЕННАЯ АВТООЧИСТКА ═══
               private fun performStartupCleanup() {
                   try {
-                      // 1. update.apk — 37 МБ после скачивания, больше не нужен
+                      // 1. update.apk (после установки больше не нужен)
                       val updateApk = File(cacheDir, "update.apk")
                       if (updateApk.exists()) {
-                          val size = updateApk.length() / 1024 / 1024
+                          val sizeMb = updateApk.length() / 1024 / 1024
                           updateApk.delete()
-                          CrashLogger.info("Cleanup", "Удалён update.apk ($size МБ)")
+                          CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
                       }
 
-                      // 2. StreamCache — просроченные записи (>2ч)
+                      // 2. StreamCache — просроченные
                       StreamCache.cleanup(this)
 
-                      // 3. cacheDir — если >15 МБ, чистим всё (кроме update.apk, его уже нет)
-                      var totalSize = 0L
-                      cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
-                      if (totalSize > 15 * 1024 * 1024) {
-                          val sizeMb = totalSize / 1024 / 1024
-                          cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                          CrashLogger.info("Cleanup", "cacheDir очищен ($sizeMb МБ)")
+                      // 3. Очистка устаревших ключей SharedPreferences (от старой авто-OTA)
+                      val staleKeys = listOf("last_ota_check", "last_ota_version")
+                      val editor = prefs.edit()
+                      var removedKeys = 0
+                      staleKeys.forEach { k -> if (prefs.contains(k)) { editor.remove(k); removedKeys++ } }
+                      if (removedKeys > 0) {
+                          editor.apply()
+                          CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
                       }
 
-                      // 4. Логируем итоговые размеры (для контроля)
-                      var filesSize = 0L
-                      filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      // 4. cacheDir — файлы старше 7 дней
+                      val sevenDays = 7L * 24 * 60 * 60 * 1000
+                      val now = System.currentTimeMillis()
+                      var oldRemoved = 0
+                      var oldBytes = 0L
+                      cacheDir.listFiles()?.forEach { f ->
+                          if (f.isFile && (now - f.lastModified()) > sevenDays) {
+                              oldBytes += f.length()
+                              if (f.delete()) oldRemoved++
+                          } else if (f.isDirectory) {
+                              f.listFiles()?.forEach { inner ->
+                                  if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
+                                      oldBytes += inner.length()
+                                      if (inner.delete()) oldRemoved++
+                                  }
+                              }
+                          }
+                      }
+                      if (oldRemoved > 0) {
+                          CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
+                      }
+
+                      // 5. cacheDir — по общему размеру (>15 МБ)
                       var cacheSize = 0L
                       cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize / 1024}КБ, cache=${cacheSize / 1024}КБ")
+                      if (cacheSize > 15 * 1024 * 1024) {
+                          val mb = cacheSize / 1024 / 1024
+                          cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                          CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
+                          cacheSize = 0L
+                      }
+
+                      // 6. Мониторинг filesDir
+                      var filesSize = 0L
+                      filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      val filesMb = filesSize / 1024 / 1024
+                      if (filesSize > 50 * 1024 * 1024) {
+                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
+                          ChannelCache.clear(this)
+                          CrashLogger.clear(this)
+                          filesSize = 0L
+                          filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      } else if (filesSize > 30 * 1024 * 1024) {
+                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
+                      }
+
+                      // 7. Свободное место
+                      val stat = StatFs(filesDir.path)
+                      val freeMb = stat.availableBytes / 1024 / 1024
+                      if (freeMb < 100) {
+                          CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
+                      }
+
+                      // 8. Итоговые размеры
+                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
                   } catch (e: Exception) {
                       CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
                   }
@@ -1619,7 +1703,7 @@ jobs:
 
               private fun loadFromNetwork(forceRefresh: Boolean) {
                   if (!NetworkUtils.isOnline(this)) {
-                      CrashLogger.info("MainActivity", "Нет интернета — загрузка отменена")
+                      CrashLogger.info("MainActivity", "Нет интернета — отмена")
                       if (allChannels.isEmpty()) {
                           b.progress.visibility = View.GONE
                           b.recycler.visibility = View.GONE
@@ -1643,28 +1727,36 @@ jobs:
                               val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
                               allChannels = fresh
                               ChannelCache.save(this@MainActivity, fresh)
+
+                              // Синхронизация favorites: удаление мёртвых записей
+                              val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
+                              val actualUrls = fresh.map { it.url }.toSet()
+                              val before = currentFavs.size
+                              currentFavs.retainAll(actualUrls)
+                              if (currentFavs.size < before) {
+                                  prefs.edit().putStringSet("favorites", currentFavs).apply()
+                                  CrashLogger.info("Favorites", "Удалено ${before - currentFavs.size} мёртвых записей")
+                              }
+
                               if (changed || forceRefresh || b.recycler.adapter == null) {
                                   updateView(scrollToLast = forceRefresh)
                               }
                           } else {
-                              val msg = "Не удалось загрузить каналы\n\nВозможно:\n• VK API вернул пустой список\n• Категория изменилась\n\nНажмите для подробностей."
-                              b.error.text = msg
+                              b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."
                               b.error.visibility = View.VISIBLE
-                              CrashLogger.error("MainActivity", "Пустой список каналов после загрузки")
+                              CrashLogger.error("MainActivity", "Пустой список каналов")
                           }
                       } catch (e: Exception) {
                           b.progress.visibility = View.GONE
-                          val msg = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}\n\nНажмите для подробностей."
-                          b.error.text = msg
+                          b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"
                           b.error.visibility = View.VISIBLE
                           CrashLogger.error("MainActivity", "Исключение при загрузке", e)
                       }
                   }
               }
 
-              // ═══ РУЧНАЯ ПРОВЕРКА OTA (по кнопке ⬇️) ═══
               private fun manualCheckForUpdates() {
-                  CrashLogger.info("OTA", "→ Ручная проверка (по кнопке)")
+                  CrashLogger.info("OTA", "Ручная проверка (кнопка ⬇️)")
                   if (!NetworkUtils.isOnline(this)) {
                       Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
                       return
@@ -1673,13 +1765,9 @@ jobs:
                   lifecycleScope.launch {
                       val info = UpdateChecker.checkForUpdate(this@MainActivity)
                       if (info == null) {
-                          Toast.makeText(this@MainActivity, "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
+                          Toast.makeText(this@MainActivity, "✅ Последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
                       } else {
-                          UpdateDialog.show(
-                              this@MainActivity,
-                              info.versionCode,
-                              info.changelog,
-                          ) { startUpdateDownload(info.downloadUrl) }
+                          UpdateDialog.show(this@MainActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
                       }
                   }
               }
@@ -1709,7 +1797,7 @@ jobs:
                   lifecycleScope.launch {
                       val file = UpdateChecker.downloadApk(this@MainActivity, url)
                       if (file == null) {
-                          Toast.makeText(this@MainActivity, "Не удалось скачать обновление", Toast.LENGTH_LONG).show()
+                          Toast.makeText(this@MainActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
                           return@launch
                       }
                       installApk(file)
@@ -1718,14 +1806,10 @@ jobs:
 
               private fun installApk(file: File) {
                   if (!packageManager.canRequestPackageInstalls()) {
-                      Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
-                      CrashLogger.info("OTA", "Нет разрешения на установку — открываем настройки")
+                      Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
                       try {
-                          val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-                          startActivity(intent)
-                      } catch (e: Exception) {
-                          CrashLogger.error("OTA", "Не удалось открыть настройки", e)
-                      }
+                          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                      } catch (_: Exception) {}
                       return
                   }
                   try {
@@ -1735,10 +1819,10 @@ jobs:
                           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                       }
                       startActivity(intent)
-                      CrashLogger.info("OTA", "Запущена установка APK")
+                      CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
                   } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка установки APK", e)
-                      Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
+                      CrashLogger.error("OTA", "Ошибка установки", e)
+                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
                   }
               }
 
@@ -1755,7 +1839,7 @@ jobs:
                   b.recycler.visibility = View.VISIBLE
                   b.recycler.adapter = ChannelAdapter(displayed, { ch ->
                       needScrollOnResume = true
-                      CrashLogger.info("UI", "Открытие канала: ${ch.name}")
+                      CrashLogger.info("UI", "Открытие: ${ch.name}")
                       val intent = Intent(this@MainActivity, PlayerActivity::class.java)
                       intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
                       intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))
@@ -1784,7 +1868,7 @@ jobs:
           }
           EOF
 
-      - name: "⚙ SettingsActivity"
+      - name: "⚙ SettingsActivity (статистика, полный сброс)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
@@ -1816,28 +1900,26 @@ jobs:
 
                   b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
                   b.txtAbout.text = """
-                      Лёгкое и быстрое приложение для просмотра телеканалов VK Live на телефоне и ТВ-приставке.
+                      Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
                       
                       🎯 ВОЗМОЖНОСТИ:
-                      • Просмотр каналов VK Live в высоком качестве
-                      • Автоматическая подгрузка списка каналов
-                      • Выбор качества видео и формата экрана
+                      • Просмотр VK Live в высоком качестве
+                      • Автоподгрузка списка каналов
+                      • Выбор качества и формата экрана
                       • Избранное (долгое нажатие ОК)
-                      • Переключение каналов пультом вверх/вниз
-                      • Панель каналов прямо в плеере (нажатие ОК)
-                      • Таймер сна (от 5 минут до 5 часов)
-                      • Ручное обновление (кнопка ⬇️ на главном экране)
-                      • Умное кэширование и автоочистка
-                      • Подробный лог всех операций
+                      • Переключение пультом вверх/вниз
+                      • Панель каналов в плеере (ОК)
+                      • Таймер сна (5м – 5ч)
+                      • Ручное обновление (⬇️ в шапке)
+                      • Умное кэширование + автоочистка
+                      • Подробный лог
                       
                       ⚙️ ТЕХНОЛОГИИ:
                       • Резолвер: yt-dlp (Python + Chaquopy)
-                      • Плеер: AndroidX Media3 (ExoPlayer)
-                      • Сборка: GitHub Actions (CI/CD)
+                      • Плеер: Media3 (ExoPlayer)
+                      • Сборка: GitHub Actions
                       
-                      🔄 Обновления: при выходе новой версии нажмите ⬇️ в шапке главного экрана.
-                      
-                      ❤️ Сделано с любовью для семьи и друзей.
+                      ❤️ Сделано для семьи и друзей.
                   """.trimIndent()
 
                   updateCacheInfo()
@@ -1857,6 +1939,15 @@ jobs:
                       CrashLogger.info("Settings", "Кэш очищен вручную")
                   }
 
+                  b.btnFullReset.setOnClickListener {
+                      AlertDialog.Builder(this)
+                          .setTitle("Полный сброс")
+                          .setMessage("Будут удалены:\n\n• Избранное\n• Последний канал\n• Все кэши\n• Лог\n\nПриложение не удалится. Продолжить?")
+                          .setPositiveButton("Сбросить") { _, _ -> performFullReset() }
+                          .setNegativeButton("Отмена", null)
+                          .show()
+                  }
+
                   b.btnOpenLog.setOnClickListener {
                       val log = CrashLogger.readAll(this)
                       AlertDialog.Builder(this)
@@ -1871,14 +1962,31 @@ jobs:
                           .show()
                   }
 
-                  b.btnShareLog.setOnClickListener {
-                      CrashLogger.share(this)
-                  }
+                  b.btnShareLog.setOnClickListener { CrashLogger.share(this) }
 
                   b.btnExitApp.setOnClickListener {
-                      CrashLogger.info("Settings", "Полный выход из настроек")
+                      CrashLogger.info("Settings", "Полный выход")
                       finishAffinity()
                       android.os.Process.killProcess(android.os.Process.myPid())
+                  }
+              }
+
+              private fun performFullReset() {
+                  try {
+                      getSharedPreferences("tvplayer", MODE_PRIVATE).edit().clear().apply()
+                      getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
+                      ChannelCache.clear(this)
+                      CrashLogger.clear(this)
+                      val il = Coil.imageLoader(this)
+                      il.diskCache?.clear()
+                      il.memoryCache?.clear()
+                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      Toast.makeText(this, "Полный сброс выполнен", Toast.LENGTH_SHORT).show()
+                      CrashLogger.info("Settings", "Полный сброс: всё очищено")
+                      updateCacheInfo()
+                  } catch (e: Exception) {
+                      CrashLogger.error("Settings", "Ошибка полного сброса", e)
+                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
                   }
               }
 
@@ -1893,20 +2001,44 @@ jobs:
                       } else {
                           b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
                           b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
-                          UpdateDialog.show(
-                              this@SettingsActivity,
-                              info.versionCode,
-                              info.changelog,
-                          ) { startUpdateDownload(info.downloadUrl) }
+                          UpdateDialog.show(this@SettingsActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
                       }
                   }
               }
 
               private fun updateCacheInfo() {
-                  var totalSize = 0L
-                  cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
-                  val sizeMb = totalSize / 1024f / 1024f
-                  b.btnClearCache.text = String.format("🗑 Очистить кэш (%.1f МБ)", sizeMb)
+                  try {
+                      val imageCacheSize = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                      val channelsCacheFile = File(filesDir, "channels_cache.json")
+                      val channelsCacheSize = if (channelsCacheFile.exists()) channelsCacheFile.length() else 0L
+                      val logFile = File(filesDir, "app.log")
+                      val logSize = if (logFile.exists()) logFile.length() else 0L
+                      val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE)
+                      val streamSize = streamPrefs.all.values.sumOf { ((it as? String)?.length ?: 0).toLong() }
+                      val totalCache = cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                      val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                      val pythonSize = totalFiles - channelsCacheSize - logSize
+
+                      val stats = buildString {
+                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)}")
+                          appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
+                          appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)}")
+                          appendLine("📝 Лог: ${formatSize(logSize)}")
+                          appendLine("🐍 Python: ${formatSize(pythonSize)}")
+                          appendLine("📦 Cache всего: ${formatSize(totalCache)}")
+                          append("💾 Files всего: ${formatSize(totalFiles)}")
+                      }
+                      b.txtCacheStats.text = stats
+                      b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))
+                  } catch (e: Exception) {
+                      b.txtCacheStats.text = "Не удалось посчитать: ${e.message}"
+                  }
+              }
+
+              private fun formatSize(bytes: Long): String = when {
+                  bytes < 1024 -> "$bytes Б"
+                  bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
+                  else -> String.format("%.1f МБ", bytes / 1024f / 1024f)
               }
 
               private fun startUpdateDownload(url: String) {
@@ -1923,10 +2055,9 @@ jobs:
 
               private fun installApk(file: File) {
                   if (!packageManager.canRequestPackageInstalls()) {
-                      Toast.makeText(this, "Разрешите установку из этого приложения", Toast.LENGTH_LONG).show()
+                      Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
                       try {
-                          val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
-                          startActivity(intent)
+                          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                       } catch (_: Exception) {}
                       return
                   }
@@ -1937,9 +2068,10 @@ jobs:
                           addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                       }
                       startActivity(intent)
+                      CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
                   } catch (e: Exception) {
                       CrashLogger.error("OTA", "Ошибка установки", e)
-                      Toast.makeText(this, "Ошибка установки: ${e.message}", Toast.LENGTH_LONG).show()
+                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
                   }
               }
           }
@@ -2059,7 +2191,7 @@ jobs:
                   }
                   b.playerView.resizeMode = currentResizeMode
                   b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
-                  CrashLogger.info("Player", "Формат изменён на: ${b.btnAspect.text}")
+                  CrashLogger.info("Player", "Формат: ${b.btnAspect.text}")
               }
 
               private fun exitApp() {
@@ -2109,10 +2241,7 @@ jobs:
                       }
                       else -> null
                   }
-                  if (nextId != null) {
-                      findViewById<View>(nextId)?.requestFocus()
-                      return true
-                  }
+                  if (nextId != null) { findViewById<View>(nextId)?.requestFocus(); return true }
                   return false
               }
 
@@ -2130,9 +2259,7 @@ jobs:
                           when (event.keyCode) {
                               KeyEvent.KEYCODE_BACK -> { hideControlsRunnable.run(); return true }
                               KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                                  (currentFocus as? View)?.performClick()
-                                  resetHideTimeout()
-                                  return true
+                                  (currentFocus as? View)?.performClick(); resetHideTimeout(); return true
                               }
                               KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
                               KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -2186,7 +2313,7 @@ jobs:
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
                   val chNum = currentIndex + 1
                   val chName = names.getOrNull(currentIndex) ?: "Канал"
-                  CrashLogger.info("Player", "Открытие канала #$chNum: $chName")
+                  CrashLogger.info("Player", "Открытие #$chNum: $chName")
                   b.channelNameOverlay.text = "$chNum. $chName"
                   b.channelNameOverlay.visibility = View.VISIBLE
                   handler.removeCallbacks(hideChannelOverlayRunnable)
@@ -2195,25 +2322,18 @@ jobs:
                   retryCount = 0
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
-                  if (cached != null) {
-                      CrashLogger.info("Player", "Использую кэш ссылки")
-                      play(cached)
-                      return
-                  }
+                  if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
                   if (!NetworkUtils.isOnline(this)) {
                       b.progress.visibility = View.GONE
-                      b.errorText.text = "Нет подключения к интернету.\n\nПроверьте Wi-Fi или кабель и нажмите «Повторить»."
+                      b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."
                       b.errorLayout.visibility = View.VISIBLE
-                      CrashLogger.info("Player", "Нет интернета при открытии канала")
+                      CrashLogger.info("Player", "Нет интернета")
                       return
                   }
                   b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
                       val direct = StreamResolver.resolve(channelUrl)
-                      if (direct.startsWith("ERROR")) {
-                          handleError(direct)
-                          return@launch
-                      }
+                      if (direct.startsWith("ERROR")) { handleError(direct); return@launch }
                       StreamCache.put(this@PlayerActivity, channelUrl, direct)
                       play(direct)
                   }
@@ -2236,9 +2356,9 @@ jobs:
                           }
                           override fun onPlayerError(error: PlaybackException) {
                               super.onPlayerError(error)
-                              CrashLogger.error("Player", "Ошибка воспроизведения: ${error.errorCodeName} (${error.errorCode}) — ${error.message}")
+                              CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})")
                               urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
-                              handleError("Ошибка плеера: ${error.errorCodeName}\n${error.message?.take(200) ?: ""}")
+                              handleError("Ошибка плеера: ${error.errorCodeName}")
                           }
                       })
                   }
@@ -2294,7 +2414,7 @@ jobs:
                   if (retryCount < MAX_RETRIES) {
                       retryCount++
                       b.progress.visibility = View.VISIBLE
-                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES через ${RETRY_DELAY}мс")
+                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES")
                       handler.postDelayed({ startPlayback() }, RETRY_DELAY)
                   } else {
                       b.progress.visibility = View.GONE
@@ -2305,7 +2425,7 @@ jobs:
                       b.rightControls.visibility = View.GONE
                       b.btnSleepTimer.visibility = View.GONE
                       b.leftControls.visibility = View.GONE
-                      CrashLogger.error("Player", "Все $MAX_RETRIES попыток исчерпаны")
+                      CrashLogger.error("Player", "Все попытки исчерпаны")
                   }
               }
 
@@ -2320,7 +2440,7 @@ jobs:
 
               private fun startSleepTimer(minutes: Int) {
                   sleepTimer?.cancel()
-                  CrashLogger.info("Player", "Таймер сна установлен на $minutes минут")
+                  CrashLogger.info("Player", "Сон: $minutes мин")
                   val millis = minutes * 60 * 1000L
                   sleepTimer = object : CountDownTimer(millis, 1000) {
                       override fun onTick(millisUntilFinished: Long) {
@@ -2328,7 +2448,7 @@ jobs:
                           b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
                       }
                       override fun onFinish() {
-                          CrashLogger.info("Player", "Таймер сна сработал — выключаюсь")
+                          CrashLogger.info("Player", "Таймер сработал — выключение")
                           exitApp()
                       }
                   }.start()
@@ -2348,7 +2468,7 @@ jobs:
 
               override fun onDestroy() {
                   super.onDestroy()
-                  CrashLogger.info("Player", "Закрытие плеера")
+                  CrashLogger.info("Player", "Закрытие")
                   handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
               }
           }
@@ -2359,7 +2479,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: manual-only OTA + aggressive cache cleanup" || echo "no changes"
+          git commit -m "feat: full cleanup (11 points) + cache stats + full reset button" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2396,20 +2516,27 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🎯 **Финальное закрытие OTA + кэш:**
+            🧹 **Полная очистка (11 улучшений):**
 
-            **OTA — только вручную:**
-            - Убрана автоматическая проверка при запуске (никаких тройных проверок физически невозможно).
-            - В шапке главного экрана — **новая кнопка «⬇️»** для ручной проверки.
-            - В настройках — кнопка «🔄 Проверить обновления» (работает как раньше).
-            - Нет интернета — при нажатии «⬇️» покажет «Нет подключения».
+            **Память — при каждом старте:**
+            1. ✅ `update.apk` (37 МБ) — удаляется
+            2. ✅ Просроченные `StreamCache` — удаляются
+            3. ✅ Устаревшие ключи `SharedPreferences` (от старой авто-OTA) — удаляются
+            4. ✅ `cacheDir` файлы старше 7 дней — удаляются
+            5. ✅ `cacheDir` >15 МБ — чистится полностью
+            6. ✅ `filesDir` >50 МБ — аварийная очистка
+            7. ✅ Свободное место <100 МБ — предупреждение в лог
+            8. ✅ Логирование всех очисток с размерами
 
-            **Автоочистка кэша при старте:**
-            - **`update.apk`** (37 МБ после скачивания) → **удаляется**.
-            - **`StreamCache`** → удаляются просроченные записи (старше 2 часов).
-            - **`cacheDir`** → если >15 МБ, чистится.
-            - **`app.log`** → ротация при >500 КБ (было раньше).
-            - В лог пишется: `Размеры: files=XКБ, cache=YКБ` — для контроля.
+            **Избранное:**
+            9. ✅ Мёртвые записи (каналы исчезли из VK) — удаляются при каждой загрузке списка
+
+            **StreamCache:**
+            10. ✅ Лимит **200 записей** — старые вытесняются при переполнении
+
+            **Настройки — новое:**
+            11. ✅ Статистика кэша: картинки / список / ссылки / лог / Python / всего
+            12. ✅ Кнопка **«⚠️ Полный сброс (всё)»** с диалогом подтверждения
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
