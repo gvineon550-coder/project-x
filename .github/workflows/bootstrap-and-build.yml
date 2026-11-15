@@ -115,7 +115,6 @@ jobs:
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n' + "\n".join(deps)
               )
-          # Defensive: полностью сбрасываем chaquopy-блок, независимо от текущего состояния
           chaquopy_match = re.search(r'^chaquopy\s*\{', txt, re.MULTILINE)
           if chaquopy_match:
               start = chaquopy_match.start()
@@ -624,6 +623,55 @@ jobs:
                               android:layout_width="match_parent"
                               android:layout_height="wrap_content"
                               android:text="🔄 Проверить обновления"
+                              android:textColor="#FFFFFFFF"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:gravity="center"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/button_accent_bg" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
+                          android:padding="20dp"
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🛡 ЗАЩИТА DNS (AdGuard DoH)"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🔒 dns.adguard-dns.com\n🔐 HTTPS (TLS 1.3)"
+                              android:textColor="@color/text"
+                              android:textSize="13sp"
+                              android:lineSpacingExtra="4dp"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/txtDohResult"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="Нажмите «Проверить DoH» для запуска диагностики"
+                              android:textColor="@color/text_dim"
+                              android:textSize="12sp"
+                              android:lineSpacingExtra="3dp"
+                              android:fontFamily="monospace"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/btnCheckDoh"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🔍 Проверить DoH"
                               android:textColor="#FFFFFFFF"
                               android:textSize="16sp"
                               android:textStyle="bold"
@@ -1292,7 +1340,7 @@ jobs:
           }
           EOF
 
-      - name: "🌐 DoH Provider (синглтон)"
+      - name: "🌐 DoH Provider (синглтон + диагностика)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/DohProvider.kt << 'EOF'
@@ -1381,6 +1429,136 @@ jobs:
                       CrashLogger.error("DoH", "❌ DoH AdGuard не работает: ${e.javaClass.simpleName}: ${e.message}", e)
                       false
                   }
+              }
+
+              // ==================== ДИАГНОСТИКА ====================
+
+              data class TestResult(
+                  val name: String,
+                  val ok: Boolean,
+                  val detail: String,
+                  val latencyMs: Long = 0L,
+                  val error: String? = null
+              )
+
+              private fun tryResolveDoH(host: String): TestResult {
+                  val started = System.currentTimeMillis()
+                  return try {
+                      val client = OkHttpClient.Builder().build()
+                      val doh = DnsOverHttps.Builder()
+                          .client(client)
+                          .url(DOH_URL.toHttpUrl())
+                          .includeIPv6(false)
+                          .build()
+                      val result = doh.lookup(host)
+                      val elapsed = System.currentTimeMillis() - started
+                      if (result.isNotEmpty()) {
+                          TestResult(name = host, ok = true, detail = "$host → ${result.first().hostAddress}", latencyMs = elapsed)
+                      } else {
+                          TestResult(name = host, ok = false, detail = "пустой ответ", latencyMs = elapsed, error = "NXDOMAIN или блокировка")
+                      }
+                  } catch (e: Exception) {
+                      TestResult(name = host, ok = false, detail = "ошибка", latencyMs = System.currentTimeMillis() - started, error = "${e.javaClass.simpleName}: ${e.message}")
+                  }
+              }
+
+              private fun trySystemResolve(host: String): TestResult {
+                  val started = System.currentTimeMillis()
+                  return try {
+                      val result = Dns.SYSTEM.lookup(host)
+                      val elapsed = System.currentTimeMillis() - started
+                      if (result.isNotEmpty()) {
+                          TestResult(name = host, ok = true, detail = "$host → ${result.first().hostAddress}", latencyMs = elapsed)
+                      } else {
+                          TestResult(name = host, ok = false, detail = "пустой ответ", latencyMs = elapsed)
+                      }
+                  } catch (e: Exception) {
+                      TestResult(name = host, ok = false, detail = "ошибка", latencyMs = System.currentTimeMillis() - started, error = "${e.javaClass.simpleName}: ${e.message}")
+                  }
+              }
+
+              private fun tryPythonHealth(): TestResult {
+                  val started = System.currentTimeMillis()
+                  return try {
+                      val m = com.chaquo.python.Python.getInstance().getModule("resolver")
+                      val health = m.callAttr("doh_health").toString()
+                      val elapsed = System.currentTimeMillis() - started
+                      val available = Regex("'available':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
+                      val cooldown = Regex("'cooldown_active':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
+                      val fails = Regex("'consecutive_fails':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+                      val cacheSize = Regex("'cache_size':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+                      if (available && !cooldown) {
+                          TestResult(name = "Python DoH", ok = true, detail = "доступен · ошибок: $fails · кэш: $cacheSize", latencyMs = elapsed)
+                      } else if (available && cooldown) {
+                          TestResult(name = "Python DoH", ok = false, detail = "в режиме ожидания (circuit breaker)", latencyMs = elapsed, error = "ошибок подряд: $fails")
+                      } else {
+                          TestResult(name = "Python DoH", ok = false, detail = "dnspython не загружен", latencyMs = elapsed, error = "Python-DoH недоступен")
+                      }
+                  } catch (e: Exception) {
+                      TestResult(name = "Python DoH", ok = false, detail = "не удалось получить статус", latencyMs = System.currentTimeMillis() - started, error = "${e.javaClass.simpleName}: ${e.message}")
+                  }
+              }
+
+              private fun formatResult(title: String, res: TestResult): String {
+                  val icon = if (res.ok) "✅" else "❌"
+                  val sb = StringBuilder()
+                  sb.append("$icon $title")
+                  if (res.ok && res.latencyMs > 0) {
+                      sb.append(" — ${res.latencyMs} мс")
+                  } else if (!res.ok) {
+                      sb.append(" — не работает")
+                  }
+                  sb.append("\n")
+                  sb.append("   ${res.detail}")
+                  if (res.error != null) {
+                      sb.append("\n   ⚠ ${res.error}")
+                  }
+                  sb.append("\n\n")
+                  return sb.toString()
+              }
+
+              fun runFullDiagnostics(context: Context): String {
+                  val sb = StringBuilder()
+                  var okCount = 0
+                  var totalCount = 0
+
+                  totalCount++
+                  val dohTest = tryResolveDoH(TEST_DOMAIN)
+                  if (dohTest.ok) okCount++
+                  sb.append(formatResult("AdGuard DoH (Kotlin)", dohTest))
+
+                  totalCount++
+                  val pyTest = tryPythonHealth()
+                  if (pyTest.ok) okCount++
+                  sb.append(formatResult("AdGuard DoH (Python)", pyTest))
+
+                  totalCount++
+                  val sysTest = trySystemResolve(TEST_DOMAIN)
+                  if (sysTest.ok) okCount++
+                  sb.append(formatResult("Системный DNS (фолбэк)", sysTest))
+
+                  totalCount++
+                  val vkTest = tryResolveDoH("api.live.vkvideo.ru")
+                  if (vkTest.ok) okCount++
+                  sb.append(formatResult("VK API через DoH", vkTest))
+
+                  totalCount++
+                  val ghTest = tryResolveDoH("api.github.com")
+                  if (ghTest.ok) okCount++
+                  sb.append(formatResult("GitHub через DoH", ghTest))
+
+                  sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+                  sb.append("Итог: $okCount/$totalCount ")
+                  if (okCount == totalCount) {
+                      sb.append("✅\n\n🎉 Все запросы идут через защищённый DNS!")
+                  } else if (okCount > 0) {
+                      sb.append("⚠️\n\nЧасть запросов идёт через фолбэк. Проверьте соединение.")
+                  } else {
+                      sb.append("❌\n\nDoH не работает. Все запросы через системный DNS.")
+                  }
+
+                  CrashLogger.info("DoH", "Диагностика: $okCount/$totalCount")
+                  return sb.toString()
               }
           }
           EOF
@@ -2156,7 +2334,7 @@ jobs:
           }
           EOF
 
-      - name: "⚙ SettingsActivity"
+      - name: "⚙ SettingsActivity (с кнопкой диагностики DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
@@ -2203,7 +2381,7 @@ jobs:
                       • Ручное обновление (⬇️ в шапке)
                       • Умное кэширование + автоочистка
                       • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
-                      • Pre-flight проверка DoH при старте
+                      • Диагностика DoH прямо в настройках
                       • Подробный лог
                       
                       ⚙️ ТЕХНОЛОГИИ:
@@ -2218,6 +2396,7 @@ jobs:
 
                   b.btnBack.setOnClickListener { finish() }
                   b.btnCheckUpdate.setOnClickListener { checkUpdate() }
+                  b.btnCheckDoh.setOnClickListener { runDohDiagnostics() }
 
                   b.btnClearCache.setOnClickListener {
                       val imageLoader = Coil.imageLoader(this)
@@ -2260,6 +2439,23 @@ jobs:
                       CrashLogger.info("Settings", "Полный выход")
                       finishAffinity()
                       android.os.Process.killProcess(android.os.Process.myPid())
+                  }
+              }
+
+              private fun runDohDiagnostics() {
+                  b.txtDohResult.text = "⏳ Проверка DoH, подождите..."
+                  b.btnCheckDoh.isEnabled = false
+                  lifecycleScope.launch {
+                      val report = withContext(Dispatchers.IO) {
+                          try {
+                              DohProvider.runFullDiagnostics(this@SettingsActivity)
+                          } catch (e: Exception) {
+                              CrashLogger.error("DoH", "Ошибка диагностики", e)
+                              "❌ Ошибка диагностики:\n${e.javaClass.simpleName}: ${e.message}"
+                          }
+                      }
+                      b.txtDohResult.text = report
+                      b.btnCheckDoh.isEnabled = true
                   }
               }
 
@@ -2781,7 +2977,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: full DoH (Python urllib + Coil + OkHttp singleton) with fallback" || echo "no changes"
+          git commit -m "feat: DoH diagnostics in Settings + full DoH coverage" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2818,30 +3014,45 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🌐 **DNS-over-HTTPS (AdGuard) — полное внедрение:**
+            🛡 **Новое: диагностика DoH прямо в Настройках**
 
-            **Что покрыто DoH:**
-            - ✅ VK API (список каналов) — `OkHttpClient` + `DohProvider`
-            - ✅ OTA (проверка и скачивание APK) — `OkHttpClient` + `DohProvider`
-            - ✅ Плеер (m3u8/HLS) — `OkHttpDataSource` + `DohProvider`
-            - ✅ Python `yt-dlp` — monkey-patch `socket.getaddrinfo` → DoH через stdlib `urllib`
-            - ✅ Coil (логотипы) — `ImageLoader.okHttpClient(...)` + `DohProvider`
+            **Как проверить:**
+            1. Откройте Настройки
+            2. Найдите карточку «🛡 ЗАЩИТА DNS (AdGuard DoH)»
+            3. Нажмите «🔍 Проверить DoH»
+            4. Через 2–5 секунд увидите отчёт с галочками:
 
-            **Не покрыто (физически невозможно из приложения):**
-            - ❌ Системный DNS Android (captive portal, служебные запросы ОС)
+            ```
+            ✅ AdGuard DoH (Kotlin) — 128 мс
+               example.com → 93.184.216.34
 
-            **Фолбэк:**
-            - Везде: AdGuard DoH → `Dns.SYSTEM` (системный DNS Android)
-            - В Python: circuit breaker — 3 ошибки подряд → пауза 60с → системный DNS
+            ✅ AdGuard DoH (Python) — доступен
+               ошибок: 0 · кэш: 5
 
-            **Pre-flight проверка DoH:**
-            - CI: `example.com` + `doubleclick.net` через AdGuard DoH
-            - При старте приложения: `DohProvider.testDoh()` + `resolver.doh_health()`
-            - В логе (`Настройки → Открыть лог`):
-              ```
-              [DoH] ✅ DoH AdGuard работает (example.com → ..., ...мс)
-              [DoH] Python DoH health: {'available': True, 'consecutive_fails': 0, ...}
-              ```
+            ✅ Системный DNS (фолбэк) — 45 мс
+               example.com → 93.184.216.34
+
+            ✅ VK API через DoH — 245 мс
+               api.live.vkvideo.ru → 87.245.195.10
+
+            ✅ GitHub через DoH — 198 мс
+               api.github.com → 140.82.121.5
+
+            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            Итог: 5/5 ✅
+
+            🎉 Все запросы идут через защищённый DNS!
+            ```
+
+            **Что проверяется:**
+            - ✅ AdGuard DoH (Kotlin) — резолв `example.com` через DoH
+            - ✅ AdGuard DoH (Python) — статус `dnspython` и circuit breaker
+            - ✅ Системный DNS (фолбэк) — резолв через `Dns.SYSTEM`
+            - ✅ VK API через DoH — резолв `api.live.vkvideo.ru`
+            - ✅ GitHub через DoH — резолв `api.github.com`
+
+            **Полное покрытие DoH (как было):**
+            - VK API, OTA, плеер (HLS), Python `yt-dlp`, Coil (логотипы)
 
             📦 Скачайте APK и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
