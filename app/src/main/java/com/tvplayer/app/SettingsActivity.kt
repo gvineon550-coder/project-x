@@ -41,7 +41,7 @@ class SettingsActivity : AppCompatActivity() {
             • Ручное обновление (⬇️ в шапке)
             • Умное кэширование + автоочистка
             • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
-            • Pre-flight проверка DoH при старте
+            • Диагностика DoH прямо в настройках
             • Подробный лог
             
             ⚙️ ТЕХНОЛОГИИ:
@@ -56,6 +56,7 @@ class SettingsActivity : AppCompatActivity() {
 
         b.btnBack.setOnClickListener { finish() }
         b.btnCheckUpdate.setOnClickListener { checkUpdate() }
+        b.btnCheckDoh.setOnClickListener { runDohDiagnostics() }
 
         b.btnClearCache.setOnClickListener {
             val imageLoader = Coil.imageLoader(this)
@@ -98,6 +99,23 @@ class SettingsActivity : AppCompatActivity() {
             CrashLogger.info("Settings", "Полный выход")
             finishAffinity()
             android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
+    private fun runDohDiagnostics() {
+        b.txtDohResult.text = "⏳ Проверка DoH, подождите..."
+        b.btnCheckDoh.isEnabled = false
+        lifecycleScope.launch {
+            val report = withContext(Dispatchers.IO) {
+                try {
+                    DohProvider.runFullDiagnostics(this@SettingsActivity)
+                } catch (e: Exception) {
+                    CrashLogger.error("DoH", "Ошибка диагностики", e)
+                    "❌ Ошибка диагностики:\n${e.javaClass.simpleName}: ${e.message}"
+                }
+            }
+            b.txtDohResult.text = report
+            b.btnCheckDoh.isEnabled = true
         }
     }
 
