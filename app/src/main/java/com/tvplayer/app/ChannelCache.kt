@@ -14,10 +14,8 @@ object ChannelCache {
             val arr = JSONArray()
             channels.forEach { ch ->
                 val obj = JSONObject()
-                obj.put("name", ch.name)
-                obj.put("url", ch.url)
-                obj.put("logo", ch.logo)
-                obj.put("group", ch.group)
+                obj.put("name", ch.name); obj.put("url", ch.url)
+                obj.put("logo", ch.logo); obj.put("group", ch.group)
                 arr.put(obj)
             }
             val root = JSONObject()

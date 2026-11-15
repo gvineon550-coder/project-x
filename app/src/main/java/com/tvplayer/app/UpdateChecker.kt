@@ -26,18 +26,12 @@ object UpdateChecker {
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "TVPlayer").build()
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}")
-                    return@withContext null
-                }
+                if (!resp.isSuccessful) { CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}"); return@withContext null }
                 val body = resp.body?.string() ?: return@withContext null
                 val json = JSONObject(body)
                 val tag = json.optString("tag_name").removePrefix("v")
                 val newVersion = tag.toIntOrNull() ?: 0
-                if (newVersion <= BuildConfig.VERSION_CODE) {
-                    CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})")
-                    return@withContext null
-                }
+                if (newVersion <= BuildConfig.VERSION_CODE) { CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})"); return@withContext null }
                 val assets = json.optJSONArray("assets") ?: return@withContext null
                 if (assets.length() == 0) return@withContext null
                 val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
@@ -45,10 +39,7 @@ object UpdateChecker {
                 CrashLogger.info("OTA", "🎉 Доступно v$newVersion")
                 UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия"))
             }
-        } catch (e: Exception) {
-            CrashLogger.error("OTA", "Ошибка проверки", e)
-            null
-        }
+        } catch (e: Exception) { CrashLogger.error("OTA", "Ошибка проверки", e); null }
     }
 
     suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
@@ -61,20 +52,12 @@ object UpdateChecker {
                 .build()
             val req = Request.Builder().url(url).build()
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}")
-                    return@withContext null
-                }
+                if (!resp.isSuccessful) { CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}"); return@withContext null }
                 val file = File(context.cacheDir, "update.apk")
-                resp.body?.byteStream()?.use { input ->
-                    file.outputStream().use { output -> input.copyTo(output) }
-                }
+                resp.body?.byteStream()?.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
                 CrashLogger.info("OTA", "✓ APK скачан: ${file.length() / 1024 / 1024} МБ")
                 file
             }
-        } catch (e: Exception) {
-            CrashLogger.error("OTA", "Ошибка скачивания", e)
-            null
-        }
+        } catch (e: Exception) { CrashLogger.error("OTA", "Ошибка скачивания", e); null }
     }
 }
