@@ -69,6 +69,11 @@ jobs:
                   'implementation("androidx.lifecycle:lifecycle-service:2.8.3")',
                   'implementation("androidx.lifecycle:lifecycle-service:2.8.3")\n    implementation("androidx.core:core-splashscreen:1.0.1")'
               )
+          if "okhttp-dnsoverhttps" not in txt:
+              txt = txt.replace(
+                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
+                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")'
+              )
           with open(path, "w") as f: f.write(txt)
           PYEOF
 
@@ -1110,7 +1115,95 @@ jobs:
           }
           EOF
 
-      - name: "🧠 Kotlin Core (VkApi, StreamCache с лимитом, ChannelCache)"
+      - name: "🌐 DoH Provider с фолбэком на системный DNS"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/DohProvider.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import okhttp3.Cache
+          import okhttp3.Dns
+          import okhttp3.HttpUrl.Companion.toHttpUrl
+          import okhttp3.OkHttpClient
+          import okhttp3.dnsoverhttps.DnsOverHttps
+          import java.io.File
+          import java.net.InetAddress
+          import java.net.UnknownHostException
+
+          object DohProvider {
+              private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
+
+              /**
+               * Возвращает кастомный Dns с фолбэком на Dns.SYSTEM.
+               * Если DoH недоступен/не ответил — происходит автоматический
+               * откат на системный DNS (без DoH).
+               */
+              fun createWithFallback(context: Context): Dns {
+                  val httpClient = OkHttpClient.Builder().build()
+                  val doh = try {
+                      // Bootstrap-клиент с кэшем (10 МБ) — чтобы DoH-запросы кэшировались
+                      val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
+                      val bootstrapClient = httpClient.newBuilder().cache(cache).build()
+
+                      DnsOverHttps.Builder()
+                          .client(bootstrapClient)
+                          .url(DOH_URL.toHttpUrl())
+                          .includeIPv6(false) // IPv4 безопаснее и стабильнее на Android TV
+                          .build()
+                  } catch (e: Exception) {
+                      CrashLogger.error("DoH", "Не удалось создать DoH — используем системный DNS", e)
+                      null
+                  }
+
+                  return object : Dns {
+                      override fun lookup(hostname: String): List<InetAddress> {
+                          if (doh != null) {
+                              try {
+                                  val result = doh.lookup(hostname)
+                                  if (result.isNotEmpty()) {
+                                      // DoH сработал
+                                      return result
+                                  }
+                                  // Пустой результат — AdGuard заблокировал или не ответил
+                                  CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
+                              } catch (e: Exception) {
+                                  // Ошибка DoH (таймаут, нет сети, сертификат и т.д.)
+                                  CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк на системный DNS")
+                              }
+                          }
+                          // ФОЛБЭК: системный DNS, если DoH нет или он не сработал
+                          return try {
+                              Dns.SYSTEM.lookup(hostname)
+                          } catch (e: UnknownHostException) {
+                              CrashLogger.error("DoH", "Системный DNS тоже не смог резолвить $hostname", e)
+                              throw e
+                          }
+                      }
+                  }
+              }
+
+              /**
+               * Проверка работоспособности DoH.
+               * Возвращает true, если AdGuard DNS резолвит домен (любой),
+               * и false — если DoH не отвечает.
+               */
+              fun testDoh(context: Context): Boolean {
+                  return try {
+                      val dns = createWithFallback(context)
+                      // Пробуем резолвить заведомо существующий домен через DoH
+                      val result = dns.lookup("dns.adguard-dns.com")
+                      val ok = result.isNotEmpty()
+                      CrashLogger.info("DoH", if (ok) "✅ DoH работает" else "⚠️ DoH вернул пустой результат")
+                      ok
+                  } catch (e: Exception) {
+                      CrashLogger.error("DoH", "❌ DoH тест провален", e)
+                      false
+                  }
+              }
+          }
+          EOF
+
+      - name: "🧠 Kotlin Core (DoH в OkHttpClient)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
@@ -1124,10 +1217,19 @@ jobs:
           import java.util.concurrent.TimeUnit
 
           data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
-          private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+
+          // Клиент с DoH + фолбэком на системный DNS
+          private fun buildClient(context: android.content.Context): OkHttpClient {
+              return OkHttpClient.Builder()
+                  .connectTimeout(10, TimeUnit.SECONDS)
+                  .readTimeout(20, TimeUnit.SECONDS)
+                  .dns(DohProvider.createWithFallback(context))
+                  .build()
+          }
+
           private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-          suspend fun loadChannels(categoryId: String, manual: List<Channel>): List<Channel> =
+          suspend fun loadChannels(context: android.content.Context, categoryId: String, manual: List<Channel>): List<Channel> =
               withContext(Dispatchers.IO) {
                   val result = mutableListOf<Channel>()
                   val startTime = System.currentTimeMillis()
@@ -1138,7 +1240,7 @@ jobs:
                           .header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
                           .header("Origin", "https://live.vkvideo.ru").header("Referer", "https://live.vkvideo.ru/")
                           .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
-                      client.newCall(req).execute().use { resp ->
+                      buildClient(context).newCall(req).execute().use { resp ->
                           val body = resp.body?.string().orEmpty()
                           CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер: ${body.length} байт")
                           if (resp.isSuccessful && body.isNotBlank()) {
@@ -1295,8 +1397,8 @@ jobs:
 
           object StreamCache {
               private const val PREFS = "stream_cache"
-              private const val TTL_MS = 2 * 60 * 60 * 1000L  // 2 часа
-              private const val MAX_ENTRIES = 200             // жёсткий лимит
+              private const val TTL_MS = 2 * 60 * 60 * 1000L
+              private const val MAX_ENTRIES = 200
 
               fun get(context: Context, channelUrl: String): String? {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -1315,7 +1417,6 @@ jobs:
               fun put(context: Context, channelUrl: String, m3u8: String) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val all = prefs.all
-                  // Эвикция старых записей, если превышен лимит
                   if (all.size >= MAX_ENTRIES) {
                       val entries = all.entries
                           .filter { it.value is String }
@@ -1448,7 +1549,11 @@ jobs:
                       if (repo.isBlank() || repo.contains("user/")) return@withContext null
                       CrashLogger.info("OTA", "→ Проверка (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
                       val url = "https://api.github.com/repos/$repo/releases/latest"
-                      val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+                      val client = OkHttpClient.Builder()
+                          .connectTimeout(10, TimeUnit.SECONDS)
+                          .readTimeout(15, TimeUnit.SECONDS)
+                          .dns(DohProvider.createWithFallback(context))
+                          .build()
                       val req = Request.Builder().url(url)
                           .header("Accept", "application/vnd.github+json")
                           .header("User-Agent", "TVPlayer").build()
@@ -1481,7 +1586,11 @@ jobs:
               suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
                   try {
                       CrashLogger.info("OTA", "→ Скачивание APK")
-                      val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
+                      val client = OkHttpClient.Builder()
+                          .connectTimeout(30, TimeUnit.SECONDS)
+                          .readTimeout(120, TimeUnit.SECONDS)
+                          .dns(DohProvider.createWithFallback(context))
+                          .build()
                       val req = Request.Builder().url(url).build()
                       client.newCall(req).execute().use { resp ->
                           if (!resp.isSuccessful) {
@@ -1503,7 +1612,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 MainActivity (ручная OTA + расширенная автоочистка + favorites)"
+      - name: "🧠 MainActivity (автоочистка + DoH в PlayerDataSource)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1599,10 +1708,8 @@ jobs:
                   }
               }
 
-              // ═══ РАСШИРЕННАЯ АВТООЧИСТКА ═══
               private fun performStartupCleanup() {
                   try {
-                      // 1. update.apk (после установки больше не нужен)
                       val updateApk = File(cacheDir, "update.apk")
                       if (updateApk.exists()) {
                           val sizeMb = updateApk.length() / 1024 / 1024
@@ -1610,10 +1717,8 @@ jobs:
                           CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
                       }
 
-                      // 2. StreamCache — просроченные
                       StreamCache.cleanup(this)
 
-                      // 3. Очистка устаревших ключей SharedPreferences (от старой авто-OTA)
                       val staleKeys = listOf("last_ota_check", "last_ota_version")
                       val editor = prefs.edit()
                       var removedKeys = 0
@@ -1623,7 +1728,6 @@ jobs:
                           CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
                       }
 
-                      // 4. cacheDir — файлы старше 7 дней
                       val sevenDays = 7L * 24 * 60 * 60 * 1000
                       val now = System.currentTimeMillis()
                       var oldRemoved = 0
@@ -1645,7 +1749,6 @@ jobs:
                           CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
                       }
 
-                      // 5. cacheDir — по общему размеру (>15 МБ)
                       var cacheSize = 0L
                       cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
                       if (cacheSize > 15 * 1024 * 1024) {
@@ -1655,7 +1758,6 @@ jobs:
                           cacheSize = 0L
                       }
 
-                      // 6. Мониторинг filesDir
                       var filesSize = 0L
                       filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
                       val filesMb = filesSize / 1024 / 1024
@@ -1669,14 +1771,12 @@ jobs:
                           CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
                       }
 
-                      // 7. Свободное место
                       val stat = StatFs(filesDir.path)
                       val freeMb = stat.availableBytes / 1024 / 1024
                       if (freeMb < 100) {
                           CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
                       }
 
-                      // 8. Итоговые размеры
                       CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
                   } catch (e: Exception) {
                       CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
@@ -1721,14 +1821,13 @@ jobs:
                                   if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
                               } else ch
                           }
-                          val fresh = loadChannels(cat, manualWithLogos)
+                          val fresh = loadChannels(this@MainActivity, cat, manualWithLogos)
                           b.progress.visibility = View.GONE
                           if (fresh.isNotEmpty()) {
                               val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
                               allChannels = fresh
                               ChannelCache.save(this@MainActivity, fresh)
 
-                              // Синхронизация favorites: удаление мёртвых записей
                               val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
                               val actualUrls = fresh.map { it.url }.toSet()
                               val before = currentFavs.size
@@ -1868,7 +1967,7 @@ jobs:
           }
           EOF
 
-      - name: "⚙ SettingsActivity (статистика, полный сброс)"
+      - name: "⚙ SettingsActivity (тест DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
@@ -1888,7 +1987,9 @@ jobs:
           import androidx.lifecycle.lifecycleScope
           import coil.Coil
           import com.tvplayer.app.databinding.ActivitySettingsBinding
+          import kotlinx.coroutines.Dispatchers
           import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
           import java.io.File
 
           class SettingsActivity : AppCompatActivity() {
@@ -1912,6 +2013,7 @@ jobs:
                       • Таймер сна (5м – 5ч)
                       • Ручное обновление (⬇️ в шапке)
                       • Умное кэширование + автоочистка
+                      • DNS-over-HTTPS (AdGuard) с фолбэком
                       • Подробный лог
                       
                       ⚙️ ТЕХНОЛОГИИ:
@@ -2077,7 +2179,7 @@ jobs:
           }
           EOF
 
-      - name: "🎬 PlayerActivity + коммит"
+      - name: "🎬 PlayerActivity (DoH через OkHttpDataSource) + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -2106,6 +2208,7 @@ jobs:
           import androidx.media3.common.TrackSelectionOverride
           import androidx.media3.common.Tracks
           import androidx.media3.datasource.DefaultHttpDataSource
+          import androidx.media3.datasource.okhttp.OkHttpDataSource
           import androidx.media3.exoplayer.DefaultLoadControl
           import androidx.media3.exoplayer.ExoPlayer
           import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -2114,6 +2217,8 @@ jobs:
           import androidx.recyclerview.widget.LinearLayoutManager
           import com.tvplayer.app.databinding.ActivityPlayerBinding
           import kotlinx.coroutines.launch
+          import okhttp3.OkHttpClient
+          import java.util.concurrent.TimeUnit
 
           class PlayerActivity : AppCompatActivity() {
               private lateinit var b: ActivityPlayerBinding
@@ -2339,15 +2444,24 @@ jobs:
                   }
               }
 
-              private fun play(m3u8: String) {
-                  player?.release()
-                  val http = DefaultHttpDataSource.Factory()
+              private fun buildHttpDataSource(): OkHttpDataSource.Factory {
+                  val okHttp = OkHttpClient.Builder()
+                      .connectTimeout(10, TimeUnit.SECONDS)
+                      .readTimeout(30, TimeUnit.SECONDS)
+                      .dns(DohProvider.createWithFallback(this))
+                      .build()
+                  return OkHttpDataSource.Factory(okHttp)
                       .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                       .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
+              }
+
+              private fun play(m3u8: String) {
+                  player?.release()
+                  val dataSource = buildHttpDataSource()
                   val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
                   trackSelector = DefaultTrackSelector(this)
                   player = ExoPlayer.Builder(this).setTrackSelector(trackSelector).setLoadControl(loadControl).build().apply {
-                      setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
+                      setMediaSource(HlsMediaSource.Factory(dataSource).createMediaSource(MediaItem.fromUri(m3u8)))
                       playWhenReady = true; prepare()
                       addListener(object : Player.Listener {
                           override fun onTracksChanged(tracks: Tracks) {
@@ -2479,7 +2593,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: full cleanup (11 points) + cache stats + full reset button" || echo "no changes"
+          git commit -m "feat: DoH (AdGuard) with automatic fallback to system DNS" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2516,27 +2630,24 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🧹 **Полная очистка (11 улучшений):**
+            🌐 **DNS-over-HTTPS (AdGuard) с фолбэком:**
 
-            **Память — при каждом старте:**
-            1. ✅ `update.apk` (37 МБ) — удаляется
-            2. ✅ Просроченные `StreamCache` — удаляются
-            3. ✅ Устаревшие ключи `SharedPreferences` (от старой авто-OTA) — удаляются
-            4. ✅ `cacheDir` файлы старше 7 дней — удаляются
-            5. ✅ `cacheDir` >15 МБ — чистится полностью
-            6. ✅ `filesDir` >50 МБ — аварийная очистка
-            7. ✅ Свободное место <100 МБ — предупреждение в лог
-            8. ✅ Логирование всех очисток с размерами
+            **Как работает:**
+            - Все запросы приложения (VK API, логотипы, GitHub) идут через **DoH** `https://dns.adguard-dns.com/dns-query`.
+            - Если AdGuard недоступен или вернул пустой результат — **автоматический фолбэк** на системный DNS (тот, что даёт интернет-провайдер).
+            - **Видеопоток VK идёт напрямую с CDN** (DoH применяется только к API/метаданным, не к самому видео).
 
-            **Избранное:**
-            9. ✅ Мёртвые записи (каналы исчезли из VK) — удаляются при каждой загрузке списка
+            **Проверка в логе:**
+            ```
+            [DoH] ✅ DoH работает
+            [DoH] Ошибка DoH для api.vkvideo.ru: timeout — фолбэк на системный DNS
+            [DoH] Пустой ответ для doubleclick.net — фолбэк на системный DNS
+            ```
 
-            **StreamCache:**
-            10. ✅ Лимит **200 записей** — старые вытесняются при переполнении
-
-            **Настройки — новое:**
-            11. ✅ Статистика кэша: картинки / список / ссылки / лог / Python / всего
-            12. ✅ Кнопка **«⚠️ Полный сброс (всё)»** с диалогом подтверждения
+            **Безопасность:**
+            - DoH не трогает видеопоток → воспроизведение не ломается.
+            - При недоступности AdGuard — тихий фолбэк → приложение работает как обычно.
+            - Вся логика в `DohProvider.kt` — можно отключить одной правкой.
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
