@@ -20,10 +20,12 @@ class ChannelAdapter(
         val ch = items[pos]
         h.txtNumber.text = (pos + 1).toString()
         h.name.text = ch.name
-        if (ch.logo.isNotBlank()) h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
-        else { h.logo.load(null); h.logo.setImageDrawable(null) }
-        if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) }
-        else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
+        if (ch.logo.isNotBlank()) {
+            h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+        } else {
+            h.logo.load(null); h.logo.setImageDrawable(null)
+        }
+        if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
         if (pos == 0) h.itemView.nextFocusUpId = R.id.btnFavFilter
         h.itemView.setOnClickListener { onClick(ch) }
         h.itemView.setOnLongClickListener { onLongClick(ch); true }

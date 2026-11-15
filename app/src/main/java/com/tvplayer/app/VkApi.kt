@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
 
 data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
 
+// Клиент с DoH + фолбэком на системный DNS
 private fun buildClient(context: android.content.Context): OkHttpClient {
     return OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)

@@ -24,15 +24,21 @@ object StreamCache {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val all = prefs.all
         if (all.size >= MAX_ENTRIES) {
-            val entries = all.entries.filter { it.value is String }.map { e ->
-                val parts = (e.value as String).split("|")
-                val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
-                e.key to ts
-            }.sortedBy { it.second }.take(maxOf(1, all.size - MAX_ENTRIES + 1))
+            val entries = all.entries
+                .filter { it.value is String }
+                .map { e ->
+                    val parts = (e.value as String).split("|")
+                    val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
+                    e.key to ts
+                }
+                .sortedBy { it.second }
+                .take(maxOf(1, all.size - MAX_ENTRIES + 1))
             val editor = prefs.edit()
             entries.forEach { editor.remove(it.first) }
             editor.apply()
-            if (entries.isNotEmpty()) CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
+            if (entries.isNotEmpty()) {
+                CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
+            }
         }
         prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
     }
@@ -57,12 +63,17 @@ object StreamCache {
         for ((key, value) in all) {
             if (value is String) {
                 val parts = value.split("|")
-                if (parts.size != 2) { editor.remove(key); removed++ }
-                else {
+                if (parts.size != 2) {
+                    editor.remove(key); removed++
+                } else {
                     val ts = parts[1].toLongOrNull() ?: 0L
-                    if (now - ts > TTL_MS) { editor.remove(key); removed++ }
+                    if (now - ts > TTL_MS) {
+                        editor.remove(key); removed++
+                    }
                 }
-            } else { editor.remove(key); removed++ }
+            } else {
+                editor.remove(key); removed++
+            }
         }
         editor.apply()
         if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных")
