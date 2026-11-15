@@ -74,6 +74,12 @@ jobs:
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")'
               )
+          # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: добавляем media3-datasource-okhttp
+          if "media3-datasource-okhttp" not in txt:
+              txt = txt.replace(
+                  'implementation("androidx.media3:media3-exoplayer-hls:1.4.1")',
+                  'implementation("androidx.media3:media3-exoplayer-hls:1.4.1")\n    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")'
+              )
           with open(path, "w") as f: f.write(txt)
           PYEOF
 
@@ -97,10 +103,8 @@ jobs:
 
           cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
               <path android:fillColor="#2563EB"
                   android:pathData="M54,20 C72.78,20 88,35.22 88,54 C88,72.78 72.78,88 54,88 C35.22,88 20,72.78 20,54 C20,35.22 35.22,20 54,20 Z" />
               <path android:fillColor="#FFFFFF" android:pathData="M48,42 L48,66 L68,54 Z" />
@@ -281,71 +285,41 @@ jobs:
           cat > app/src/main/res/layout/dialog_update.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:maxHeight="400dp"
-              android:padding="16dp"
-              android:scrollbars="vertical"
-              android:fadeScrollbars="false">
-              <TextView
-                  android:id="@+id/dialogUpdateText"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:textColor="#FFFFFFFF"
-                  android:textSize="14sp"
-                  android:lineSpacingExtra="4dp"
-                  android:textIsSelectable="true" />
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:maxHeight="400dp" android:padding="16dp"
+              android:scrollbars="vertical" android:fadeScrollbars="false">
+              <TextView android:id="@+id/dialogUpdateText"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:textColor="#FFFFFFFF" android:textSize="14sp"
+                  android:lineSpacingExtra="4dp" android:textIsSelectable="true" />
           </ScrollView>
           EOF
 
           cat > app/src/main/res/layout/item_channel.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:orientation="horizontal"
-              android:padding="12dp"
-              android:focusable="true"
-              android:focusableInTouchMode="true"
-              android:background="@drawable/tile_selector"
-              android:clickable="true"
-              android:layout_marginBottom="4dp"
-              android:gravity="center_vertical">
-              <TextView
-                  android:id="@+id/txtNumber"
-                  android:layout_width="40dp"
-                  android:layout_height="wrap_content"
-                  android:gravity="center"
-                  android:textColor="@color/text_dim"
-                  android:textSize="16sp"
-                  android:textStyle="bold" />
-              <ImageView
-                  android:id="@+id/logo"
-                  android:layout_width="80dp"
-                  android:layout_height="80dp"
-                  android:scaleType="centerCrop"
-                  android:background="#222222" />
-              <TextView
-                  android:id="@+id/name"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:layout_weight="1"
-                  android:paddingStart="16dp"
-                  android:paddingEnd="8dp"
-                  android:gravity="center_vertical"
-                  android:textColor="@color/text"
-                  android:textSize="18sp"
-                  android:textStyle="bold"
-                  android:maxLines="2"
-                  android:ellipsize="end" />
-              <ImageView
-                  android:id="@+id/btnFav"
-                  android:layout_width="48dp"
-                  android:layout_height="48dp"
-                  android:padding="8dp"
-                  android:src="@android:drawable/btn_star_big_off"
-                  android:focusable="false"
-                  android:clickable="false" />
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:padding="12dp"
+              android:focusable="true" android:focusableInTouchMode="true"
+              android:background="@drawable/tile_selector" android:clickable="true"
+              android:layout_marginBottom="4dp" android:gravity="center_vertical">
+              <TextView android:id="@+id/txtNumber"
+                  android:layout_width="40dp" android:layout_height="wrap_content"
+                  android:gravity="center" android:textColor="@color/text_dim"
+                  android:textSize="16sp" android:textStyle="bold" />
+              <ImageView android:id="@+id/logo"
+                  android:layout_width="80dp" android:layout_height="80dp"
+                  android:scaleType="centerCrop" android:background="#222222" />
+              <TextView android:id="@+id/name"
+                  android:layout_width="0dp" android:layout_height="wrap_content"
+                  android:layout_weight="1" android:paddingStart="16dp" android:paddingEnd="8dp"
+                  android:gravity="center_vertical" android:textColor="@color/text"
+                  android:textSize="18sp" android:textStyle="bold"
+                  android:maxLines="2" android:ellipsize="end" />
+              <ImageView android:id="@+id/btnFav"
+                  android:layout_width="48dp" android:layout_height="48dp"
+                  android:padding="8dp" android:src="@android:drawable/btn_star_big_off"
+                  android:focusable="false" android:clickable="false" />
           </LinearLayout>
           EOF
 
@@ -354,104 +328,63 @@ jobs:
           <androidx.constraintlayout.widget.ConstraintLayout
               xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
+              android:layout_width="match_parent" android:layout_height="match_parent"
               android:background="@color/bg">
-              <LinearLayout
-                  android:id="@+id/topBar"
-                  android:layout_width="match_parent"
-                  android:layout_height="64dp"
-                  android:orientation="horizontal"
-                  android:background="#1A1A1A"
-                  android:gravity="center_vertical"
-                  android:paddingHorizontal="16dp"
+              <LinearLayout android:id="@+id/topBar"
+                  android:layout_width="match_parent" android:layout_height="64dp"
+                  android:orientation="horizontal" android:background="#1A1A1A"
+                  android:gravity="center_vertical" android:paddingHorizontal="16dp"
                   app:layout_constraintTop_toTopOf="parent">
-                  <TextView
-                      android:id="@+id/txtTitle"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:text="Все каналы"
-                      android:textColor="@color/text"
-                      android:textSize="22sp"
+                  <TextView android:id="@+id/txtTitle"
+                      android:layout_width="0dp" android:layout_height="wrap_content"
+                      android:layout_weight="1" android:text="Все каналы"
+                      android:textColor="@color/text" android:textSize="22sp"
                       android:textStyle="bold" />
-                  <TextView
-                      android:id="@+id/btnFavFilter"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="★ Избранное"
-                      android:textColor="#FFEB3B"
-                      android:textSize="16sp"
-                      android:textStyle="bold"
-                      android:padding="12dp"
-                      android:focusable="true"
-                      android:clickable="true"
+                  <TextView android:id="@+id/btnFavFilter"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:text="★ Избранное" android:textColor="#FFEB3B"
+                      android:textSize="16sp" android:textStyle="bold"
+                      android:padding="12dp" android:focusable="true"
+                      android:clickable="true" android:background="?attr/selectableItemBackground" />
+                  <TextView android:id="@+id/btnRefresh"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:text="Обновить" android:textColor="@color/text_dim"
+                      android:textSize="16sp" android:padding="12dp"
+                      android:focusable="true" android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
-                  <TextView
-                      android:id="@+id/btnRefresh"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Обновить"
-                      android:textColor="@color/text_dim"
-                      android:textSize="16sp"
-                      android:padding="12dp"
-                      android:focusable="true"
-                      android:clickable="true"
-                      android:background="?attr/selectableItemBackground" />
-                  <TextView
-                      android:id="@+id/btnCheckUpdates"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="⬇️"
-                      android:textColor="@color/text_dim"
-                      android:textSize="22sp"
-                      android:paddingHorizontal="12dp"
-                      android:focusable="true"
-                      android:clickable="true"
+                  <TextView android:id="@+id/btnCheckUpdates"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:text="⬇️" android:textColor="@color/text_dim"
+                      android:textSize="22sp" android:paddingHorizontal="12dp"
+                      android:focusable="true" android:clickable="true"
                       android:contentDescription="Проверить обновления"
                       android:background="?attr/selectableItemBackground" />
-                  <TextView
-                      android:id="@+id/btnSettings"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="⚙"
-                      android:textColor="@color/text_dim"
-                      android:textSize="22sp"
-                      android:paddingHorizontal="12dp"
-                      android:focusable="true"
-                      android:clickable="true"
+                  <TextView android:id="@+id/btnSettings"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:text="⚙" android:textColor="@color/text_dim"
+                      android:textSize="22sp" android:paddingHorizontal="12dp"
+                      android:focusable="true" android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
               </LinearLayout>
-              <androidx.recyclerview.widget.RecyclerView
-                  android:id="@+id/recycler"
-                  android:layout_width="0dp"
-                  android:layout_height="0dp"
-                  android:padding="8dp"
-                  android:clipToPadding="false"
+              <androidx.recyclerview.widget.RecyclerView android:id="@+id/recycler"
+                  android:layout_width="0dp" android:layout_height="0dp"
+                  android:padding="8dp" android:clipToPadding="false"
                   app:layout_constraintTop_toBottomOf="@id/topBar"
                   app:layout_constraintBottom_toBottomOf="parent"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
-              <ProgressBar
-                  android:id="@+id/progress"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
+              <ProgressBar android:id="@+id/progress"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
                   app:layout_constraintTop_toTopOf="@id/recycler"
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
-              <TextView
-                  android:id="@+id/error"
-                  android:layout_width="0dp"
-                  android:layout_height="wrap_content"
-                  android:padding="24dp"
-                  android:gravity="center"
-                  android:textColor="#FFFF6B6B"
-                  android:textSize="14sp"
-                  android:lineSpacingExtra="3dp"
-                  android:clickable="true"
-                  android:focusable="true"
-                  android:visibility="gone"
+              <TextView android:id="@+id/error"
+                  android:layout_width="0dp" android:layout_height="wrap_content"
+                  android:padding="24dp" android:gravity="center"
+                  android:textColor="#FFFF6B6B" android:textSize="14sp"
+                  android:lineSpacingExtra="3dp" android:clickable="true"
+                  android:focusable="true" android:visibility="gone"
                   app:layout_constraintTop_toTopOf="@id/recycler"
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
                   app:layout_constraintStart_toStartOf="parent"
@@ -464,218 +397,121 @@ jobs:
           <androidx.constraintlayout.widget.ConstraintLayout
               xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
+              android:layout_width="match_parent" android:layout_height="match_parent"
               android:background="@color/bg">
-              <LinearLayout
-                  android:id="@+id/topBar"
-                  android:layout_width="match_parent"
-                  android:layout_height="64dp"
-                  android:orientation="horizontal"
-                  android:background="#1A1A1A"
-                  android:gravity="center_vertical"
-                  android:paddingHorizontal="16dp"
+              <LinearLayout android:id="@+id/topBar"
+                  android:layout_width="match_parent" android:layout_height="64dp"
+                  android:orientation="horizontal" android:background="#1A1A1A"
+                  android:gravity="center_vertical" android:paddingHorizontal="16dp"
                   app:layout_constraintTop_toTopOf="parent">
-                  <TextView
-                      android:id="@+id/btnBack"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="← Назад"
-                      android:textColor="@color/text"
-                      android:textSize="18sp"
-                      android:textStyle="bold"
-                      android:padding="12dp"
-                      android:focusable="true"
-                      android:clickable="true"
-                      android:background="?attr/selectableItemBackground" />
-                  <TextView
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:text="Настройки"
-                      android:textColor="@color/text"
-                      android:textSize="22sp"
-                      android:textStyle="bold"
-                      android:paddingStart="16dp" />
+                  <TextView android:id="@+id/btnBack"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:text="← Назад" android:textColor="@color/text"
+                      android:textSize="18sp" android:textStyle="bold"
+                      android:padding="12dp" android:focusable="true"
+                      android:clickable="true" android:background="?attr/selectableItemBackground" />
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                      android:layout_weight="1" android:text="Настройки"
+                      android:textColor="@color/text" android:textSize="22sp"
+                      android:textStyle="bold" android:paddingStart="16dp" />
               </LinearLayout>
-              <ScrollView
-                  android:layout_width="0dp"
-                  android:layout_height="0dp"
+              <ScrollView android:layout_width="0dp" android:layout_height="0dp"
                   android:fillViewport="true"
                   app:layout_constraintTop_toBottomOf="@id/topBar"
                   app:layout_constraintBottom_toBottomOf="parent"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent">
-                  <LinearLayout
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:orientation="vertical"
+                  <LinearLayout android:layout_width="match_parent"
+                      android:layout_height="wrap_content" android:orientation="vertical"
                       android:padding="16dp">
-
-                      <LinearLayout
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:orientation="vertical"
-                          android:background="@drawable/card_bg"
-                          android:padding="20dp"
+                      <LinearLayout android:layout_width="match_parent"
+                          android:layout_height="wrap_content" android:orientation="vertical"
+                          android:background="@drawable/card_bg" android:padding="20dp"
                           android:layout_marginBottom="16dp">
-                          <TextView
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="ОБНОВЛЕНИЯ"
-                              android:textColor="#FF8A8D93"
-                              android:textSize="12sp"
-                              android:textStyle="bold"
-                              android:letterSpacing="0.1"
+                          <TextView android:layout_width="match_parent"
+                              android:layout_height="wrap_content" android:text="ОБНОВЛЕНИЯ"
+                              android:textColor="#FF8A8D93" android:textSize="12sp"
+                              android:textStyle="bold" android:letterSpacing="0.1"
                               android:paddingBottom="12dp" />
-                          <TextView
-                              android:id="@+id/txtVersion"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="TV Player"
-                              android:textColor="@color/text"
-                              android:textSize="20sp"
-                              android:textStyle="bold" />
-                          <TextView
-                              android:id="@+id/txtStatus"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="Проверка обновлений..."
-                              android:textColor="#FF8A8D93"
-                              android:textSize="14sp"
-                              android:paddingTop="6dp"
+                          <TextView android:id="@+id/txtVersion"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="TV Player" android:textColor="@color/text"
+                              android:textSize="20sp" android:textStyle="bold" />
+                          <TextView android:id="@+id/txtStatus"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="Проверка обновлений..." android:textColor="#FF8A8D93"
+                              android:textSize="14sp" android:paddingTop="6dp"
                               android:paddingBottom="16dp" />
-                          <TextView
-                              android:id="@+id/btnCheckUpdate"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="🔄 Проверить обновления"
-                              android:textColor="#FFFFFFFF"
-                              android:textSize="16sp"
-                              android:textStyle="bold"
-                              android:gravity="center"
-                              android:padding="16dp"
-                              android:focusable="true"
-                              android:clickable="true"
+                          <TextView android:id="@+id/btnCheckUpdate"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="🔄 Проверить обновления" android:textColor="#FFFFFFFF"
+                              android:textSize="16sp" android:textStyle="bold"
+                              android:gravity="center" android:padding="16dp"
+                              android:focusable="true" android:clickable="true"
                               android:background="@drawable/button_accent_bg" />
                       </LinearLayout>
-
-                      <LinearLayout
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:orientation="vertical"
-                          android:background="@drawable/card_bg"
-                          android:padding="20dp"
+                      <LinearLayout android:layout_width="match_parent"
+                          android:layout_height="wrap_content" android:orientation="vertical"
+                          android:background="@drawable/card_bg" android:padding="20dp"
                           android:layout_marginBottom="16dp">
-                          <TextView
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="ПАМЯТЬ"
-                              android:textColor="#FF8A8D93"
-                              android:textSize="12sp"
-                              android:textStyle="bold"
-                              android:letterSpacing="0.1"
+                          <TextView android:layout_width="match_parent"
+                              android:layout_height="wrap_content" android:text="ПАМЯТЬ"
+                              android:textColor="#FF8A8D93" android:textSize="12sp"
+                              android:textStyle="bold" android:letterSpacing="0.1"
                               android:paddingBottom="12dp" />
-                          <TextView
-                              android:id="@+id/txtCacheStats"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="Подсчёт..."
-                              android:textColor="@color/text_dim"
-                              android:textSize="13sp"
-                              android:lineSpacingExtra="2dp"
-                              android:fontFamily="monospace"
-                              android:paddingBottom="12dp" />
-                          <TextView
-                              android:id="@+id/btnClearCache"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="🗑 Очистить кэш"
-                              android:textColor="@color/text"
-                              android:textSize="16sp"
-                              android:textStyle="bold"
-                              android:padding="16dp"
-                              android:focusable="true"
-                              android:clickable="true"
-                              android:background="@drawable/tile_selector"
+                          <TextView android:id="@+id/txtCacheStats"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="Подсчёт..." android:textColor="@color/text_dim"
+                              android:textSize="13sp" android:lineSpacingExtra="2dp"
+                              android:fontFamily="monospace" android:paddingBottom="12dp" />
+                          <TextView android:id="@+id/btnClearCache"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="🗑 Очистить кэш" android:textColor="@color/text"
+                              android:textSize="16sp" android:textStyle="bold"
+                              android:padding="16dp" android:focusable="true"
+                              android:clickable="true" android:background="@drawable/tile_selector"
                               android:layout_marginBottom="8dp" />
-                          <TextView
-                              android:id="@+id/btnFullReset"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="⚠️ Полный сброс (всё)"
-                              android:textColor="#FFFF6B6B"
-                              android:textSize="16sp"
-                              android:textStyle="bold"
-                              android:padding="16dp"
-                              android:focusable="true"
-                              android:clickable="true"
-                              android:background="@drawable/tile_selector"
+                          <TextView android:id="@+id/btnFullReset"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="⚠️ Полный сброс (всё)" android:textColor="#FFFF6B6B"
+                              android:textSize="16sp" android:textStyle="bold"
+                              android:padding="16dp" android:focusable="true"
+                              android:clickable="true" android:background="@drawable/tile_selector"
                               android:layout_marginBottom="8dp" />
-                          <TextView
-                              android:id="@+id/btnOpenLog"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="📋 Открыть лог"
-                              android:textColor="@color/text"
-                              android:textSize="16sp"
-                              android:textStyle="bold"
-                              android:padding="16dp"
-                              android:focusable="true"
-                              android:clickable="true"
-                              android:background="@drawable/tile_selector"
+                          <TextView android:id="@+id/btnOpenLog"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="📋 Открыть лог" android:textColor="@color/text"
+                              android:textSize="16sp" android:textStyle="bold"
+                              android:padding="16dp" android:focusable="true"
+                              android:clickable="true" android:background="@drawable/tile_selector"
                               android:layout_marginBottom="8dp" />
-                          <TextView
-                              android:id="@+id/btnShareLog"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="📤 Отправить лог"
-                              android:textColor="@color/text"
-                              android:textSize="16sp"
-                              android:textStyle="bold"
-                              android:padding="16dp"
-                              android:focusable="true"
-                              android:clickable="true"
-                              android:background="@drawable/tile_selector" />
+                          <TextView android:id="@+id/btnShareLog"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:text="📤 Отправить лог" android:textColor="@color/text"
+                              android:textSize="16sp" android:textStyle="bold"
+                              android:padding="16dp" android:focusable="true"
+                              android:clickable="true" android:background="@drawable/tile_selector" />
                       </LinearLayout>
-
-                      <LinearLayout
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:orientation="vertical"
-                          android:background="@drawable/card_bg"
-                          android:padding="20dp"
+                      <LinearLayout android:layout_width="match_parent"
+                          android:layout_height="wrap_content" android:orientation="vertical"
+                          android:background="@drawable/card_bg" android:padding="20dp"
                           android:layout_marginBottom="16dp">
-                          <TextView
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:text="О ПРОГРАММЕ"
-                              android:textColor="#FF8A8D93"
-                              android:textSize="12sp"
-                              android:textStyle="bold"
-                              android:letterSpacing="0.1"
+                          <TextView android:layout_width="match_parent"
+                              android:layout_height="wrap_content" android:text="О ПРОГРАММЕ"
+                              android:textColor="#FF8A8D93" android:textSize="12sp"
+                              android:textStyle="bold" android:letterSpacing="0.1"
                               android:paddingBottom="12dp" />
-                          <TextView
-                              android:id="@+id/txtAbout"
-                              android:layout_width="match_parent"
-                              android:layout_height="wrap_content"
-                              android:textColor="@color/text"
-                              android:textSize="14sp"
+                          <TextView android:id="@+id/txtAbout"
+                              android:layout_width="match_parent" android:layout_height="wrap_content"
+                              android:textColor="@color/text" android:textSize="14sp"
                               android:lineSpacingExtra="4dp" />
                       </LinearLayout>
-
-                      <TextView
-                          android:id="@+id/btnExitApp"
-                          android:layout_width="match_parent"
-                          android:layout_height="wrap_content"
-                          android:text="✕ Выход из приложения"
-                          android:textColor="#FFFF6B6B"
-                          android:textSize="16sp"
-                          android:textStyle="bold"
-                          android:gravity="center"
-                          android:padding="20dp"
-                          android:focusable="true"
-                          android:clickable="true"
+                      <TextView android:id="@+id/btnExitApp"
+                          android:layout_width="match_parent" android:layout_height="wrap_content"
+                          android:text="✕ Выход из приложения" android:textColor="#FFFF6B6B"
+                          android:textSize="16sp" android:textStyle="bold"
+                          android:gravity="center" android:padding="20dp"
+                          android:focusable="true" android:clickable="true"
                           android:background="@drawable/card_bg" />
                   </LinearLayout>
               </ScrollView>
@@ -686,229 +522,115 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:app="http://schemas.android.com/apk/res-auto"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
+              android:layout_width="match_parent" android:layout_height="match_parent"
               android:background="#000000">
-
-              <androidx.media3.ui.PlayerView
-                  android:id="@+id/playerView"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  app:use_controller="false"
-                  app:resize_mode="zoom"
-                  android:keepScreenOn="true"
-                  android:focusable="false" />
-
-              <View
-                  android:id="@+id/touchArea"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  android:focusable="false"
-                  android:focusableInTouchMode="false" />
-
-              <LinearLayout
-                  android:id="@+id/channelListPanel"
-                  android:layout_width="320dp"
-                  android:layout_height="match_parent"
-                  android:layout_gravity="start"
-                  android:background="#EE111111"
-                  android:visibility="gone"
-                  android:orientation="vertical"
+              <androidx.media3.ui.PlayerView android:id="@+id/playerView"
+                  android:layout_width="match_parent" android:layout_height="match_parent"
+                  app:use_controller="false" app:resize_mode="zoom"
+                  android:keepScreenOn="true" android:focusable="false" />
+              <View android:id="@+id/touchArea"
+                  android:layout_width="match_parent" android:layout_height="match_parent"
+                  android:focusable="false" android:focusableInTouchMode="false" />
+              <LinearLayout android:id="@+id/channelListPanel"
+                  android:layout_width="320dp" android:layout_height="match_parent"
+                  android:layout_gravity="start" android:background="#EE111111"
+                  android:visibility="gone" android:orientation="vertical"
                   android:elevation="8dp">
-                  <TextView
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:text="Выбор канала"
-                      android:textColor="#FFFFFF"
-                      android:textSize="20sp"
-                      android:textStyle="bold"
-                      android:padding="16dp" />
-                  <androidx.recyclerview.widget.RecyclerView
-                      android:id="@+id/channelListRecycler"
-                      android:layout_width="match_parent"
-                      android:layout_height="match_parent" />
+                  <TextView android:layout_width="match_parent"
+                      android:layout_height="wrap_content" android:text="Выбор канала"
+                      android:textColor="#FFFFFF" android:textSize="20sp"
+                      android:textStyle="bold" android:padding="16dp" />
+                  <androidx.recyclerview.widget.RecyclerView android:id="@+id/channelListRecycler"
+                      android:layout_width="match_parent" android:layout_height="match_parent" />
               </LinearLayout>
-
-              <TextView
-                  android:id="@+id/channelNameOverlay"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_gravity="bottom|start"
-                  android:layout_margin="32dp"
-                  android:background="#AA000000"
-                  android:paddingHorizontal="24dp"
-                  android:paddingVertical="16dp"
-                  android:textColor="#FFFFFF"
-                  android:textSize="24sp"
-                  android:textStyle="bold"
+              <TextView android:id="@+id/channelNameOverlay"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="bottom|start" android:layout_margin="32dp"
+                  android:background="#AA000000" android:paddingHorizontal="24dp"
+                  android:paddingVertical="16dp" android:textColor="#FFFFFF"
+                  android:textSize="24sp" android:textStyle="bold"
                   android:visibility="gone" />
-
-              <LinearLayout
-                  android:id="@+id/controlsOverlay"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent"
-                  android:background="#55000000"
-                  android:gravity="center"
-                  android:orientation="vertical"
-                  android:visibility="gone">
-                  <ImageView
-                      android:id="@+id/btnPlayPause"
-                      android:layout_width="96dp"
-                      android:layout_height="96dp"
+              <LinearLayout android:id="@+id/controlsOverlay"
+                  android:layout_width="match_parent" android:layout_height="match_parent"
+                  android:background="#55000000" android:gravity="center"
+                  android:orientation="vertical" android:visibility="gone">
+                  <ImageView android:id="@+id/btnPlayPause"
+                      android:layout_width="96dp" android:layout_height="96dp"
                       android:src="@android:drawable/ic_media_pause"
                       android:background="@drawable/btn_play_pause_focus"
-                      android:padding="20dp"
-                      app:tint="#FFFFFF"
-                      android:clickable="true"
-                      android:focusable="true" />
+                      android:padding="20dp" app:tint="#FFFFFF"
+                      android:clickable="true" android:focusable="true" />
               </LinearLayout>
-
-              <LinearLayout
-                  android:id="@+id/leftControls"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_gravity="top|start"
-                  android:layout_margin="24dp"
-                  android:orientation="horizontal"
-                  android:visibility="gone">
-                  <TextView
-                      android:id="@+id/btnBack"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:background="@drawable/button_focus_bg"
-                      android:paddingHorizontal="16dp"
-                      android:paddingVertical="8dp"
-                      android:text="← В список"
-                      android:textColor="#FFFFFF"
-                      android:textSize="16sp"
-                      android:textStyle="bold"
-                      android:clickable="true"
-                      android:focusable="true" />
-                  <TextView
-                      android:id="@+id/btnExitApp"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:layout_marginStart="8dp"
-                      android:background="@drawable/button_focus_bg"
-                      android:paddingHorizontal="16dp"
-                      android:paddingVertical="8dp"
-                      android:text="✕ Выход"
-                      android:textColor="#FFFFFF"
-                      android:textSize="16sp"
-                      android:textStyle="bold"
-                      android:clickable="true"
-                      android:focusable="true" />
+              <LinearLayout android:id="@+id/leftControls"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="top|start" android:layout_margin="24dp"
+                  android:orientation="horizontal" android:visibility="gone">
+                  <TextView android:id="@+id/btnBack"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:background="@drawable/button_focus_bg" android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp" android:text="← В список"
+                      android:textColor="#FFFFFF" android:textSize="16sp"
+                      android:textStyle="bold" android:clickable="true" android:focusable="true" />
+                  <TextView android:id="@+id/btnExitApp"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:layout_marginStart="8dp" android:background="@drawable/button_focus_bg"
+                      android:paddingHorizontal="16dp" android:paddingVertical="8dp"
+                      android:text="✕ Выход" android:textColor="#FFFFFF"
+                      android:textSize="16sp" android:textStyle="bold"
+                      android:clickable="true" android:focusable="true" />
               </LinearLayout>
-
-              <TextView
-                  android:id="@+id/btnSleepTimer"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_gravity="top|center_horizontal"
-                  android:layout_margin="24dp"
-                  android:background="@drawable/button_focus_bg"
-                  android:paddingHorizontal="16dp"
-                  android:paddingVertical="8dp"
-                  android:text="Сон: Выкл"
-                  android:textColor="#FFFFFF"
-                  android:textSize="16sp"
-                  android:textStyle="bold"
-                  android:clickable="true"
-                  android:focusable="true"
-                  android:visibility="gone" />
-
-              <LinearLayout
-                  android:id="@+id/rightControls"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_gravity="top|end"
-                  android:layout_margin="24dp"
-                  android:orientation="vertical"
-                  android:visibility="gone">
-                  <TextView
-                      android:id="@+id/btnQuality"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:background="@drawable/button_focus_bg"
-                      android:paddingHorizontal="16dp"
-                      android:paddingVertical="8dp"
-                      android:text="Auto"
-                      android:textColor="#FFFFFF"
-                      android:textSize="16sp"
-                      android:textStyle="bold"
-                      android:clickable="true"
-                      android:focusable="true" />
-                  <TextView
-                      android:id="@+id/btnAspect"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:layout_marginTop="8dp"
-                      android:background="@drawable/button_focus_bg"
-                      android:paddingHorizontal="16dp"
-                      android:paddingVertical="8dp"
-                      android:text="Заполнить"
-                      android:textColor="#FFFFFF"
-                      android:textSize="16sp"
-                      android:textStyle="bold"
-                      android:clickable="true"
-                      android:focusable="true" />
+              <TextView android:id="@+id/btnSleepTimer"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="top|center_horizontal" android:layout_margin="24dp"
+                  android:background="@drawable/button_focus_bg" android:paddingHorizontal="16dp"
+                  android:paddingVertical="8dp" android:text="Сон: Выкл"
+                  android:textColor="#FFFFFF" android:textSize="16sp"
+                  android:textStyle="bold" android:clickable="true"
+                  android:focusable="true" android:visibility="gone" />
+              <LinearLayout android:id="@+id/rightControls"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="top|end" android:layout_margin="24dp"
+                  android:orientation="vertical" android:visibility="gone">
+                  <TextView android:id="@+id/btnQuality"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:background="@drawable/button_focus_bg" android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp" android:text="Auto"
+                      android:textColor="#FFFFFF" android:textSize="16sp"
+                      android:textStyle="bold" android:clickable="true" android:focusable="true" />
+                  <TextView android:id="@+id/btnAspect"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:layout_marginTop="8dp" android:background="@drawable/button_focus_bg"
+                      android:paddingHorizontal="16dp" android:paddingVertical="8dp"
+                      android:text="Заполнить" android:textColor="#FFFFFF"
+                      android:textSize="16sp" android:textStyle="bold"
+                      android:clickable="true" android:focusable="true" />
               </LinearLayout>
-
-              <ProgressBar
-                  android:id="@+id/progress"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
+              <ProgressBar android:id="@+id/progress"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
                   android:layout_gravity="center" />
-
-              <LinearLayout
-                  android:id="@+id/errorLayout"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_gravity="center"
-                  android:orientation="vertical"
-                  android:gravity="center"
-                  android:visibility="gone"
-                  android:background="#DD000000"
-                  android:padding="24dp">
-
-                  <TextView
-                      android:id="@+id/errorText"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:textColor="#FFAAAAAA"
-                      android:textSize="14sp"
-                      android:lineSpacingExtra="3dp"
-                      android:gravity="center" />
-
-                  <TextView
-                      android:id="@+id/btnShowLog"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:layout_marginTop="12dp"
-                      android:background="#333333"
-                      android:paddingHorizontal="20dp"
-                      android:paddingVertical="10dp"
-                      android:text="📋 Подробнее"
-                      android:textColor="#FFFFFF"
-                      android:textSize="14sp"
-                      android:textStyle="bold"
-                      android:clickable="true"
-                      android:focusable="true" />
-
-                  <TextView
-                      android:id="@+id/btnRetry"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:layout_marginTop="12dp"
-                      android:background="#333333"
-                      android:paddingHorizontal="24dp"
-                      android:paddingVertical="12dp"
-                      android:text="Повторить"
-                      android:textColor="#FFFFFF"
-                      android:textSize="18sp"
-                      android:textStyle="bold"
-                      android:clickable="true"
-                      android:focusable="true" />
+              <LinearLayout android:id="@+id/errorLayout"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="center" android:orientation="vertical"
+                  android:gravity="center" android:visibility="gone"
+                  android:background="#DD000000" android:padding="24dp">
+                  <TextView android:id="@+id/errorText"
+                      android:layout_width="match_parent" android:layout_height="wrap_content"
+                      android:textColor="#FFAAAAAA" android:textSize="14sp"
+                      android:lineSpacingExtra="3dp" android:gravity="center" />
+                  <TextView android:id="@+id/btnShowLog"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:layout_marginTop="12dp" android:background="#333333"
+                      android:paddingHorizontal="20dp" android:paddingVertical="10dp"
+                      android:text="📋 Подробнее" android:textColor="#FFFFFF"
+                      android:textSize="14sp" android:textStyle="bold"
+                      android:clickable="true" android:focusable="true" />
+                  <TextView android:id="@+id/btnRetry"
+                      android:layout_width="wrap_content" android:layout_height="wrap_content"
+                      android:layout_marginTop="12dp" android:background="#333333"
+                      android:paddingHorizontal="24dp" android:paddingVertical="12dp"
+                      android:text="Повторить" android:textColor="#FFFFFF"
+                      android:textSize="18sp" android:textStyle="bold"
+                      android:clickable="true" android:focusable="true" />
               </LinearLayout>
           </FrameLayout>
           EOF
@@ -917,14 +639,10 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <TextView xmlns:android="http://schemas.android.com/apk/res/android"
               android:id="@+id/panelChannelName"
-              android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:padding="16dp"
-              android:textColor="#FFFFFF"
-              android:textSize="18sp"
-              android:focusable="true"
-              android:focusableInTouchMode="true"
-              android:clickable="true"
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:padding="16dp" android:textColor="#FFFFFF"
+              android:textSize="18sp" android:focusable="true"
+              android:focusableInTouchMode="true" android:clickable="true"
               android:background="?attr/selectableItemBackground" />
           EOF
 
@@ -1095,16 +813,10 @@ jobs:
           import android.widget.TextView
 
           object UpdateDialog {
-              fun show(
-                  context: Context,
-                  versionCode: Int,
-                  changelog: String,
-                  onInstall: () -> Unit
-              ) {
+              fun show(context: Context, versionCode: Int, changelog: String, onInstall: () -> Unit) {
                   val view = LayoutInflater.from(context).inflate(R.layout.dialog_update, null)
                   val text = view.findViewById<TextView>(R.id.dialogUpdateText)
                   text.text = if (changelog.isBlank()) "Новая версия приложения" else changelog
-
                   AlertDialog.Builder(context)
                       .setTitle("Доступно обновление v$versionCode")
                       .setView(view)
@@ -1133,25 +845,18 @@ jobs:
           object DohProvider {
               private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
 
-              /**
-               * Возвращает кастомный Dns с фолбэком на Dns.SYSTEM.
-               * Если DoH недоступен/не ответил — происходит автоматический
-               * откат на системный DNS (без DoH).
-               */
               fun createWithFallback(context: Context): Dns {
                   val httpClient = OkHttpClient.Builder().build()
                   val doh = try {
-                      // Bootstrap-клиент с кэшем (10 МБ) — чтобы DoH-запросы кэшировались
                       val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
                       val bootstrapClient = httpClient.newBuilder().cache(cache).build()
-
                       DnsOverHttps.Builder()
                           .client(bootstrapClient)
                           .url(DOH_URL.toHttpUrl())
-                          .includeIPv6(false) // IPv4 безопаснее и стабильнее на Android TV
+                          .includeIPv6(false)
                           .build()
                   } catch (e: Exception) {
-                      CrashLogger.error("DoH", "Не удалось создать DoH — используем системный DNS", e)
+                      CrashLogger.error("DoH", "Не удалось создать DoH — системный DNS", e)
                       null
                   }
 
@@ -1160,40 +865,28 @@ jobs:
                           if (doh != null) {
                               try {
                                   val result = doh.lookup(hostname)
-                                  if (result.isNotEmpty()) {
-                                      // DoH сработал
-                                      return result
-                                  }
-                                  // Пустой результат — AdGuard заблокировал или не ответил
-                                  CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
+                                  if (result.isNotEmpty()) return result
+                                  CrashLogger.info("DoH", "Пустой ответ для $hostname — системный DNS")
                               } catch (e: Exception) {
-                                  // Ошибка DoH (таймаут, нет сети, сертификат и т.д.)
-                                  CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк на системный DNS")
+                                  CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — системный DNS")
                               }
                           }
-                          // ФОЛБЭК: системный DNS, если DoH нет или он не сработал
                           return try {
                               Dns.SYSTEM.lookup(hostname)
                           } catch (e: UnknownHostException) {
-                              CrashLogger.error("DoH", "Системный DNS тоже не смог резолвить $hostname", e)
+                              CrashLogger.error("DoH", "Системный DNS не смог $hostname", e)
                               throw e
                           }
                       }
                   }
               }
 
-              /**
-               * Проверка работоспособности DoH.
-               * Возвращает true, если AdGuard DNS резолвит домен (любой),
-               * и false — если DoH не отвечает.
-               */
               fun testDoh(context: Context): Boolean {
                   return try {
                       val dns = createWithFallback(context)
-                      // Пробуем резолвить заведомо существующий домен через DoH
                       val result = dns.lookup("dns.adguard-dns.com")
                       val ok = result.isNotEmpty()
-                      CrashLogger.info("DoH", if (ok) "✅ DoH работает" else "⚠️ DoH вернул пустой результат")
+                      CrashLogger.info("DoH", if (ok) "✅ DoH работает" else "⚠️ DoH пустой результат")
                       ok
                   } catch (e: Exception) {
                       CrashLogger.error("DoH", "❌ DoH тест провален", e)
@@ -1203,7 +896,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 Kotlin Core (DoH в OkHttpClient)"
+      - name: "🧠 Kotlin Core (с DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
@@ -1218,7 +911,6 @@ jobs:
 
           data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
 
-          // Клиент с DoH + фолбэком на системный DNS
           private fun buildClient(context: android.content.Context): OkHttpClient {
               return OkHttpClient.Builder()
                   .connectTimeout(10, TimeUnit.SECONDS)
@@ -1285,10 +977,8 @@ jobs:
                       val arr = JSONArray()
                       channels.forEach { ch ->
                           val obj = JSONObject()
-                          obj.put("name", ch.name)
-                          obj.put("url", ch.url)
-                          obj.put("logo", ch.logo)
-                          obj.put("group", ch.group)
+                          obj.put("name", ch.name); obj.put("url", ch.url)
+                          obj.put("logo", ch.logo); obj.put("group", ch.group)
                           arr.put(obj)
                       }
                       val root = JSONObject()
@@ -1418,21 +1108,15 @@ jobs:
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val all = prefs.all
                   if (all.size >= MAX_ENTRIES) {
-                      val entries = all.entries
-                          .filter { it.value is String }
-                          .map { e ->
-                              val parts = (e.value as String).split("|")
-                              val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
-                              e.key to ts
-                          }
-                          .sortedBy { it.second }
-                          .take(maxOf(1, all.size - MAX_ENTRIES + 1))
+                      val entries = all.entries.filter { it.value is String }.map { e ->
+                          val parts = (e.value as String).split("|")
+                          val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
+                          e.key to ts
+                      }.sortedBy { it.second }.take(maxOf(1, all.size - MAX_ENTRIES + 1))
                       val editor = prefs.edit()
                       entries.forEach { editor.remove(it.first) }
                       editor.apply()
-                      if (entries.isNotEmpty()) {
-                          CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
-                      }
+                      if (entries.isNotEmpty()) CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
                   }
                   prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
               }
@@ -1457,17 +1141,12 @@ jobs:
                   for ((key, value) in all) {
                       if (value is String) {
                           val parts = value.split("|")
-                          if (parts.size != 2) {
-                              editor.remove(key); removed++
-                          } else {
+                          if (parts.size != 2) { editor.remove(key); removed++ }
+                          else {
                               val ts = parts[1].toLongOrNull() ?: 0L
-                              if (now - ts > TTL_MS) {
-                                  editor.remove(key); removed++
-                              }
+                              if (now - ts > TTL_MS) { editor.remove(key); removed++ }
                           }
-                      } else {
-                          editor.remove(key); removed++
-                      }
+                      } else { editor.remove(key); removed++ }
                   }
                   editor.apply()
                   if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных")
@@ -1498,12 +1177,10 @@ jobs:
                   val ch = items[pos]
                   h.txtNumber.text = (pos + 1).toString()
                   h.name.text = ch.name
-                  if (ch.logo.isNotBlank()) {
-                      h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
-                  } else {
-                      h.logo.load(null); h.logo.setImageDrawable(null)
-                  }
-                  if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
+                  if (ch.logo.isNotBlank()) h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+                  else { h.logo.load(null); h.logo.setImageDrawable(null) }
+                  if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) }
+                  else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
                   if (pos == 0) h.itemView.nextFocusUpId = R.id.btnFavFilter
                   h.itemView.setOnClickListener { onClick(ch) }
                   h.itemView.setOnLongClickListener { onLongClick(ch); true }
@@ -1558,18 +1235,12 @@ jobs:
                           .header("Accept", "application/vnd.github+json")
                           .header("User-Agent", "TVPlayer").build()
                       client.newCall(req).execute().use { resp ->
-                          if (!resp.isSuccessful) {
-                              CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}")
-                              return@withContext null
-                          }
+                          if (!resp.isSuccessful) { CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}"); return@withContext null }
                           val body = resp.body?.string() ?: return@withContext null
                           val json = JSONObject(body)
                           val tag = json.optString("tag_name").removePrefix("v")
                           val newVersion = tag.toIntOrNull() ?: 0
-                          if (newVersion <= BuildConfig.VERSION_CODE) {
-                              CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})")
-                              return@withContext null
-                          }
+                          if (newVersion <= BuildConfig.VERSION_CODE) { CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})"); return@withContext null }
                           val assets = json.optJSONArray("assets") ?: return@withContext null
                           if (assets.length() == 0) return@withContext null
                           val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
@@ -1577,10 +1248,7 @@ jobs:
                           CrashLogger.info("OTA", "🎉 Доступно v$newVersion")
                           UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия"))
                       }
-                  } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка проверки", e)
-                      null
-                  }
+                  } catch (e: Exception) { CrashLogger.error("OTA", "Ошибка проверки", e); null }
               }
 
               suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
@@ -1593,26 +1261,18 @@ jobs:
                           .build()
                       val req = Request.Builder().url(url).build()
                       client.newCall(req).execute().use { resp ->
-                          if (!resp.isSuccessful) {
-                              CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}")
-                              return@withContext null
-                          }
+                          if (!resp.isSuccessful) { CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}"); return@withContext null }
                           val file = File(context.cacheDir, "update.apk")
-                          resp.body?.byteStream()?.use { input ->
-                              file.outputStream().use { output -> input.copyTo(output) }
-                          }
+                          resp.body?.byteStream()?.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
                           CrashLogger.info("OTA", "✓ APK скачан: ${file.length() / 1024 / 1024} МБ")
                           file
                       }
-                  } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка скачивания", e)
-                      null
-                  }
+                  } catch (e: Exception) { CrashLogger.error("OTA", "Ошибка скачивания", e); null }
               }
           }
           EOF
 
-      - name: "🧠 MainActivity (автоочистка + DoH в PlayerDataSource)"
+      - name: "🧠 MainActivity (автоочистка + DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1702,9 +1362,7 @@ jobs:
                   val lastIndex = prefs.getInt("last_channel", 0)
                   if (lastIndex in allChannels.indices) {
                       (b.recycler.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(lastIndex, 0)
-                      b.recycler.postDelayed({
-                          b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus()
-                      }, 100)
+                      b.recycler.postDelayed({ b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus() }, 100)
                   }
               }
 
@@ -1716,71 +1374,34 @@ jobs:
                           updateApk.delete()
                           CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
                       }
-
                       StreamCache.cleanup(this)
-
                       val staleKeys = listOf("last_ota_check", "last_ota_version")
                       val editor = prefs.edit()
                       var removedKeys = 0
                       staleKeys.forEach { k -> if (prefs.contains(k)) { editor.remove(k); removedKeys++ } }
-                      if (removedKeys > 0) {
-                          editor.apply()
-                          CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
-                      }
-
+                      if (removedKeys > 0) { editor.apply(); CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs") }
                       val sevenDays = 7L * 24 * 60 * 60 * 1000
                       val now = System.currentTimeMillis()
                       var oldRemoved = 0
                       var oldBytes = 0L
                       cacheDir.listFiles()?.forEach { f ->
-                          if (f.isFile && (now - f.lastModified()) > sevenDays) {
-                              oldBytes += f.length()
-                              if (f.delete()) oldRemoved++
-                          } else if (f.isDirectory) {
-                              f.listFiles()?.forEach { inner ->
-                                  if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
-                                      oldBytes += inner.length()
-                                      if (inner.delete()) oldRemoved++
-                                  }
-                              }
-                          }
+                          if (f.isFile && (now - f.lastModified()) > sevenDays) { oldBytes += f.length(); if (f.delete()) oldRemoved++ }
+                          else if (f.isDirectory) { f.listFiles()?.forEach { inner -> if (inner.isFile && (now - inner.lastModified()) > sevenDays) { oldBytes += inner.length(); if (inner.delete()) oldRemoved++ } } }
                       }
-                      if (oldRemoved > 0) {
-                          CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
-                      }
-
+                      if (oldRemoved > 0) CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
                       var cacheSize = 0L
                       cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-                      if (cacheSize > 15 * 1024 * 1024) {
-                          val mb = cacheSize / 1024 / 1024
-                          cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                          CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
-                          cacheSize = 0L
-                      }
-
+                      if (cacheSize > 15 * 1024 * 1024) { val mb = cacheSize / 1024 / 1024; cacheDir.listFiles()?.forEach { it.deleteRecursively() }; CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)"); cacheSize = 0L }
                       var filesSize = 0L
                       filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
                       val filesMb = filesSize / 1024 / 1024
-                      if (filesSize > 50 * 1024 * 1024) {
-                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
-                          ChannelCache.clear(this)
-                          CrashLogger.clear(this)
-                          filesSize = 0L
-                          filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-                      } else if (filesSize > 30 * 1024 * 1024) {
-                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
-                      }
-
+                      if (filesSize > 50 * 1024 * 1024) { CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка"); ChannelCache.clear(this); CrashLogger.clear(this); filesSize = 0L; filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() } }
+                      else if (filesSize > 30 * 1024 * 1024) { CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)") }
                       val stat = StatFs(filesDir.path)
                       val freeMb = stat.availableBytes / 1024 / 1024
-                      if (freeMb < 100) {
-                          CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
-                      }
-
+                      if (freeMb < 100) CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
                       CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
-                  } catch (e: Exception) {
-                      CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
-                  }
+                  } catch (e: Exception) { CrashLogger.error("Cleanup", "Ошибка автоочистки", e) }
               }
 
               private fun loadInitial() {
@@ -1788,147 +1409,75 @@ jobs:
                   if (cached != null && cached.isNotEmpty()) {
                       allChannels = cached
                       updateView(scrollToLast = true)
-                      if (ChannelCache.isFresh(this)) {
-                          CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем")
-                          return
-                      }
+                      if (ChannelCache.isFresh(this)) { CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем"); return }
                       CrashLogger.info("MainActivity", "Кэш устарел — обновление в фоне")
                       loadFromNetwork(forceRefresh = false)
-                  } else {
-                      CrashLogger.info("MainActivity", "Кэш пуст — полная загрузка")
-                      b.progress.visibility = View.VISIBLE
-                      loadFromNetwork(forceRefresh = false)
-                  }
+                  } else { CrashLogger.info("MainActivity", "Кэш пуст — полная загрузка"); b.progress.visibility = View.VISIBLE; loadFromNetwork(forceRefresh = false) }
               }
 
               private fun loadFromNetwork(forceRefresh: Boolean) {
-                  if (!NetworkUtils.isOnline(this)) {
-                      CrashLogger.info("MainActivity", "Нет интернета — отмена")
-                      if (allChannels.isEmpty()) {
-                          b.progress.visibility = View.GONE
-                          b.recycler.visibility = View.GONE
-                          b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
-                          b.error.visibility = View.VISIBLE
-                      }
-                      return
-                  }
+                  if (!NetworkUtils.isOnline(this)) { CrashLogger.info("MainActivity", "Нет интернета — отмена"); if (allChannels.isEmpty()) { b.progress.visibility = View.GONE; b.recycler.visibility = View.GONE; b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."; b.error.visibility = View.VISIBLE }; return }
                   lifecycleScope.launch {
                       try {
                           val (manual, cat) = readConfig()
-                          val manualWithLogos = manual.map { ch ->
-                              if (ch.logo.isBlank()) {
-                                  val thumb = StreamResolver.getThumbnail(ch.url)
-                                  if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
-                              } else ch
-                          }
+                          val manualWithLogos = manual.map { ch -> if (ch.logo.isBlank()) { val thumb = StreamResolver.getThumbnail(ch.url); if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch } else ch }
                           val fresh = loadChannels(this@MainActivity, cat, manualWithLogos)
                           b.progress.visibility = View.GONE
                           if (fresh.isNotEmpty()) {
                               val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
-                              allChannels = fresh
-                              ChannelCache.save(this@MainActivity, fresh)
-
+                              allChannels = fresh; ChannelCache.save(this@MainActivity, fresh)
                               val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
                               val actualUrls = fresh.map { it.url }.toSet()
-                              val before = currentFavs.size
-                              currentFavs.retainAll(actualUrls)
-                              if (currentFavs.size < before) {
-                                  prefs.edit().putStringSet("favorites", currentFavs).apply()
-                                  CrashLogger.info("Favorites", "Удалено ${before - currentFavs.size} мёртвых записей")
-                              }
-
-                              if (changed || forceRefresh || b.recycler.adapter == null) {
-                                  updateView(scrollToLast = forceRefresh)
-                              }
-                          } else {
-                              b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."
-                              b.error.visibility = View.VISIBLE
-                              CrashLogger.error("MainActivity", "Пустой список каналов")
-                          }
-                      } catch (e: Exception) {
-                          b.progress.visibility = View.GONE
-                          b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"
-                          b.error.visibility = View.VISIBLE
-                          CrashLogger.error("MainActivity", "Исключение при загрузке", e)
-                      }
+                              val before = currentFavs.size; currentFavs.retainAll(actualUrls)
+                              if (currentFavs.size < before) { prefs.edit().putStringSet("favorites", currentFavs).apply(); CrashLogger.info("Favorites", "Удалено ${before - currentFavs.size} мёртвых записей") }
+                              if (changed || forceRefresh || b.recycler.adapter == null) updateView(scrollToLast = forceRefresh)
+                          } else { b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."; b.error.visibility = View.VISIBLE; CrashLogger.error("MainActivity", "Пустой список каналов") }
+                      } catch (e: Exception) { b.progress.visibility = View.GONE; b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"; b.error.visibility = View.VISIBLE; CrashLogger.error("MainActivity", "Исключение при загрузке", e) }
                   }
               }
 
               private fun manualCheckForUpdates() {
                   CrashLogger.info("OTA", "Ручная проверка (кнопка ⬇️)")
-                  if (!NetworkUtils.isOnline(this)) {
-                      Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
-                      return
-                  }
+                  if (!NetworkUtils.isOnline(this)) { Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show(); return }
                   Toast.makeText(this, "Проверка обновлений...", Toast.LENGTH_SHORT).show()
                   lifecycleScope.launch {
                       val info = UpdateChecker.checkForUpdate(this@MainActivity)
-                      if (info == null) {
-                          Toast.makeText(this@MainActivity, "✅ Последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
-                      } else {
-                          UpdateDialog.show(this@MainActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
-                      }
+                      if (info == null) Toast.makeText(this@MainActivity, "✅ Последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
+                      else UpdateDialog.show(this@MainActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
                   }
               }
 
               private fun showLogDialog() {
                   val log = CrashLogger.readAll(this)
-                  AlertDialog.Builder(this)
-                      .setTitle("Лог приложения")
-                      .setMessage(log.takeLast(3000))
+                  AlertDialog.Builder(this).setTitle("Лог приложения").setMessage(log.takeLast(3000))
                       .setPositiveButton("Отправить") { _, _ -> CrashLogger.share(this) }
-                      .setNegativeButton("Скопировать") { _, _ ->
-                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                          clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
-                          Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
-                      }
-                      .setNeutralButton("Закрыть", null)
-                      .show()
+                      .setNegativeButton("Скопировать") { _, _ -> val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager; clipboard.setPrimaryClip(ClipData.newPlainText("log", log)); Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show() }
+                      .setNeutralButton("Закрыть", null).show()
               }
 
-              private fun exitApp() {
-                  finishAffinity()
-                  android.os.Process.killProcess(android.os.Process.myPid())
-              }
+              private fun exitApp() { finishAffinity(); android.os.Process.killProcess(android.os.Process.myPid()) }
 
               private fun startUpdateDownload(url: String) {
                   Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
                   lifecycleScope.launch {
                       val file = UpdateChecker.downloadApk(this@MainActivity, url)
-                      if (file == null) {
-                          Toast.makeText(this@MainActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
-                          return@launch
-                      }
+                      if (file == null) { Toast.makeText(this@MainActivity, "Не удалось скачать", Toast.LENGTH_LONG).show(); return@launch }
                       installApk(file)
                   }
               }
 
               private fun installApk(file: File) {
-                  if (!packageManager.canRequestPackageInstalls()) {
-                      Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
-                      try {
-                          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
-                      } catch (_: Exception) {}
-                      return
-                  }
+                  if (!packageManager.canRequestPackageInstalls()) { Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show(); try { startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) } catch (_: Exception) {}; return }
                   try {
                       val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-                      val intent = Intent(Intent.ACTION_VIEW).apply {
-                          setDataAndType(uri, "application/vnd.android.package-archive")
-                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                      }
-                      startActivity(intent)
-                      CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
-                  } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка установки", e)
-                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
-                  }
+                      val intent = Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK) }
+                      startActivity(intent); CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
+                  } catch (e: Exception) { CrashLogger.error("OTA", "Ошибка установки", e); Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show() }
               }
 
               private fun updateView(scrollToLast: Boolean = false) {
                   if (allChannels.isEmpty()) return
-                  b.progress.visibility = View.GONE
-                  b.error.visibility = View.GONE
+                  b.progress.visibility = View.GONE; b.error.visibility = View.GONE
                   val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
                   allChannels.forEach { it.isFavorite = favs.contains(it.url) }
                   val sorted = allChannels.sortedByDescending { it.isFavorite }
@@ -1937,8 +1486,7 @@ jobs:
                   b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
                   b.recycler.visibility = View.VISIBLE
                   b.recycler.adapter = ChannelAdapter(displayed, { ch ->
-                      needScrollOnResume = true
-                      CrashLogger.info("UI", "Открытие: ${ch.name}")
+                      needScrollOnResume = true; CrashLogger.info("UI", "Открытие: ${ch.name}")
                       val intent = Intent(this@MainActivity, PlayerActivity::class.java)
                       intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
                       intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))
@@ -1947,14 +1495,9 @@ jobs:
                   }, { ch ->
                       val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
                       if (currentFavs.contains(ch.url)) currentFavs.remove(ch.url) else currentFavs.add(ch.url)
-                      prefs.edit().putStringSet("favorites", currentFavs).apply()
-                      updateView(scrollToLast = false)
+                      prefs.edit().putStringSet("favorites", currentFavs).apply(); updateView(scrollToLast = false)
                   })
-
-                  b.recycler.post {
-                      if (scrollToLast) scrollToLastChannel()
-                      else b.recycler.getChildAt(0)?.requestFocus()
-                  }
+                  b.recycler.post { if (scrollToLast) scrollToLastChannel() else b.recycler.getChildAt(0)?.requestFocus() }
               }
 
               private fun readConfig(): Pair<List<Channel>, String> {
@@ -1967,7 +1510,7 @@ jobs:
           }
           EOF
 
-      - name: "⚙ SettingsActivity (тест DoH)"
+      - name: "⚙ SettingsActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
@@ -1987,9 +1530,7 @@ jobs:
           import androidx.lifecycle.lifecycleScope
           import coil.Coil
           import com.tvplayer.app.databinding.ActivitySettingsBinding
-          import kotlinx.coroutines.Dispatchers
           import kotlinx.coroutines.launch
-          import kotlinx.coroutines.withContext
           import java.io.File
 
           class SettingsActivity : AppCompatActivity() {
@@ -1998,7 +1539,6 @@ jobs:
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
                   b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
-
                   b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
                   b.txtAbout.text = """
                       Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
@@ -2023,104 +1563,58 @@ jobs:
                       
                       ❤️ Сделано для семьи и друзей.
                   """.trimIndent()
-
                   updateCacheInfo()
-
                   b.btnBack.setOnClickListener { finish() }
                   b.btnCheckUpdate.setOnClickListener { checkUpdate() }
-
                   b.btnClearCache.setOnClickListener {
-                      val imageLoader = Coil.imageLoader(this)
-                      imageLoader.diskCache?.clear()
-                      imageLoader.memoryCache?.clear()
-                      StreamCache.clearAll(this)
-                      ChannelCache.clear(this)
-                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                      Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
-                      updateCacheInfo()
-                      CrashLogger.info("Settings", "Кэш очищен вручную")
+                      val imageLoader = Coil.imageLoader(this); imageLoader.diskCache?.clear(); imageLoader.memoryCache?.clear()
+                      StreamCache.clearAll(this); ChannelCache.clear(this); cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show(); updateCacheInfo(); CrashLogger.info("Settings", "Кэш очищен вручную")
                   }
-
                   b.btnFullReset.setOnClickListener {
-                      AlertDialog.Builder(this)
-                          .setTitle("Полный сброс")
+                      AlertDialog.Builder(this).setTitle("Полный сброс")
                           .setMessage("Будут удалены:\n\n• Избранное\n• Последний канал\n• Все кэши\n• Лог\n\nПриложение не удалится. Продолжить?")
-                          .setPositiveButton("Сбросить") { _, _ -> performFullReset() }
-                          .setNegativeButton("Отмена", null)
-                          .show()
+                          .setPositiveButton("Сбросить") { _, _ -> performFullReset() }.setNegativeButton("Отмена", null).show()
                   }
-
                   b.btnOpenLog.setOnClickListener {
                       val log = CrashLogger.readAll(this)
-                      AlertDialog.Builder(this)
-                          .setTitle("Лог приложения")
-                          .setMessage(log.takeLast(3000))
-                          .setPositiveButton("Скопировать") { _, _ ->
-                              val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                              clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
-                              Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
-                          }
-                          .setNegativeButton("Закрыть", null)
-                          .show()
+                      AlertDialog.Builder(this).setTitle("Лог приложения").setMessage(log.takeLast(3000))
+                          .setPositiveButton("Скопировать") { _, _ -> val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager; clipboard.setPrimaryClip(ClipData.newPlainText("log", log)); Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show() }
+                          .setNegativeButton("Закрыть", null).show()
                   }
-
                   b.btnShareLog.setOnClickListener { CrashLogger.share(this) }
-
-                  b.btnExitApp.setOnClickListener {
-                      CrashLogger.info("Settings", "Полный выход")
-                      finishAffinity()
-                      android.os.Process.killProcess(android.os.Process.myPid())
-                  }
+                  b.btnExitApp.setOnClickListener { CrashLogger.info("Settings", "Полный выход"); finishAffinity(); android.os.Process.killProcess(android.os.Process.myPid()) }
               }
 
               private fun performFullReset() {
                   try {
                       getSharedPreferences("tvplayer", MODE_PRIVATE).edit().clear().apply()
                       getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
-                      ChannelCache.clear(this)
-                      CrashLogger.clear(this)
-                      val il = Coil.imageLoader(this)
-                      il.diskCache?.clear()
-                      il.memoryCache?.clear()
+                      ChannelCache.clear(this); CrashLogger.clear(this)
+                      val il = Coil.imageLoader(this); il.diskCache?.clear(); il.memoryCache?.clear()
                       cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                      Toast.makeText(this, "Полный сброс выполнен", Toast.LENGTH_SHORT).show()
-                      CrashLogger.info("Settings", "Полный сброс: всё очищено")
-                      updateCacheInfo()
-                  } catch (e: Exception) {
-                      CrashLogger.error("Settings", "Ошибка полного сброса", e)
-                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
-                  }
+                      Toast.makeText(this, "Полный сброс выполнен", Toast.LENGTH_SHORT).show(); CrashLogger.info("Settings", "Полный сброс: всё очищено"); updateCacheInfo()
+                  } catch (e: Exception) { CrashLogger.error("Settings", "Ошибка полного сброса", e); Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show() }
               }
 
               private fun checkUpdate() {
-                  b.txtStatus.text = "⏳ Проверка обновлений..."
-                  b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
+                  b.txtStatus.text = "⏳ Проверка обновлений..."; b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
                   lifecycleScope.launch {
                       val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
-                      if (info == null) {
-                          b.txtStatus.text = "✅ У вас актуальная версия"
-                          b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80"))
-                      } else {
-                          b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
-                          b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
-                          UpdateDialog.show(this@SettingsActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
-                      }
+                      if (info == null) { b.txtStatus.text = "✅ У вас актуальная версия"; b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80")) }
+                      else { b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"; b.txtStatus.setTextColor(Color.parseColor("#FFFACC15")); UpdateDialog.show(this@SettingsActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) } }
                   }
               }
 
               private fun updateCacheInfo() {
                   try {
                       val imageCacheSize = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                      val channelsCacheFile = File(filesDir, "channels_cache.json")
-                      val channelsCacheSize = if (channelsCacheFile.exists()) channelsCacheFile.length() else 0L
-                      val logFile = File(filesDir, "app.log")
-                      val logSize = if (logFile.exists()) logFile.length() else 0L
-                      val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE)
-                      val streamSize = streamPrefs.all.values.sumOf { ((it as? String)?.length ?: 0).toLong() }
+                      val channelsCacheFile = File(filesDir, "channels_cache.json"); val channelsCacheSize = if (channelsCacheFile.exists()) channelsCacheFile.length() else 0L
+                      val logFile = File(filesDir, "app.log"); val logSize = if (logFile.exists()) logFile.length() else 0L
+                      val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE); val streamSize = streamPrefs.all.values.sumOf { ((it as? String)?.length ?: 0).toLong() }
                       val totalCache = cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
                       val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
                       val pythonSize = totalFiles - channelsCacheSize - logSize
-
                       val stats = buildString {
                           appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)}")
                           appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
@@ -2130,51 +1624,28 @@ jobs:
                           appendLine("📦 Cache всего: ${formatSize(totalCache)}")
                           append("💾 Files всего: ${formatSize(totalFiles)}")
                       }
-                      b.txtCacheStats.text = stats
-                      b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))
-                  } catch (e: Exception) {
-                      b.txtCacheStats.text = "Не удалось посчитать: ${e.message}"
-                  }
+                      b.txtCacheStats.text = stats; b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))
+                  } catch (e: Exception) { b.txtCacheStats.text = "Не удалось посчитать: ${e.message}" }
               }
 
-              private fun formatSize(bytes: Long): String = when {
-                  bytes < 1024 -> "$bytes Б"
-                  bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
-                  else -> String.format("%.1f МБ", bytes / 1024f / 1024f)
-              }
+              private fun formatSize(bytes: Long): String = when { bytes < 1024 -> "$bytes Б"; bytes < 1024 * 1024 -> "${bytes / 1024} КБ"; else -> String.format("%.1f МБ", bytes / 1024f / 1024f) }
 
               private fun startUpdateDownload(url: String) {
                   Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
                   lifecycleScope.launch {
                       val file = UpdateChecker.downloadApk(this@SettingsActivity, url)
-                      if (file == null) {
-                          Toast.makeText(this@SettingsActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
-                          return@launch
-                      }
+                      if (file == null) { Toast.makeText(this@SettingsActivity, "Не удалось скачать", Toast.LENGTH_LONG).show(); return@launch }
                       installApk(file)
                   }
               }
 
               private fun installApk(file: File) {
-                  if (!packageManager.canRequestPackageInstalls()) {
-                      Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
-                      try {
-                          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
-                      } catch (_: Exception) {}
-                      return
-                  }
+                  if (!packageManager.canRequestPackageInstalls()) { Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show(); try { startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) } catch (_: Exception) {}; return }
                   try {
                       val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-                      val intent = Intent(Intent.ACTION_VIEW).apply {
-                          setDataAndType(uri, "application/vnd.android.package-archive")
-                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                      }
-                      startActivity(intent)
-                      CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
-                  } catch (e: Exception) {
-                      CrashLogger.error("OTA", "Ошибка установки", e)
-                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
-                  }
+                      val intent = Intent(Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/vnd.android.package-archive"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK) }
+                      startActivity(intent); CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
+                  } catch (e: Exception) { CrashLogger.error("OTA", "Ошибка установки", e); Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show() }
               }
           }
           EOF
@@ -2207,7 +1678,6 @@ jobs:
           import androidx.media3.common.Player
           import androidx.media3.common.TrackSelectionOverride
           import androidx.media3.common.Tracks
-          import androidx.media3.datasource.DefaultHttpDataSource
           import androidx.media3.datasource.okhttp.OkHttpDataSource
           import androidx.media3.exoplayer.DefaultLoadControl
           import androidx.media3.exoplayer.ExoPlayer
@@ -2233,12 +1703,7 @@ jobs:
               private val RETRY_DELAY = 2000L
               private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
               private val handler = Handler(Looper.getMainLooper())
-              private val hideControlsRunnable = Runnable {
-                  b.controlsOverlay.visibility = View.GONE
-                  b.rightControls.visibility = View.GONE
-                  b.btnSleepTimer.visibility = View.GONE
-                  b.leftControls.visibility = View.GONE
-              }
+              private val hideControlsRunnable = Runnable { b.controlsOverlay.visibility = View.GONE; b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
 
               override fun onCreate(s: Bundle?) {
@@ -2248,17 +1713,12 @@ jobs:
                   val controller = WindowInsetsControllerCompat(window, window.decorView)
                   controller.hide(WindowInsetsCompat.Type.systemBars())
                   controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
-                  b.touchArea.isFocusable = false
-                  b.touchArea.isFocusableInTouchMode = false
-
+                  b.touchArea.isFocusable = false; b.touchArea.isFocusableInTouchMode = false
                   setupFocusHighlight()
-
                   names = intent.getStringArrayListExtra("names") ?: emptyList()
                   urls = intent.getStringArrayListExtra("urls") ?: emptyList()
                   currentIndex = intent.getIntExtra("index", 0)
                   startPlayback()
-
                   b.btnBack.setOnClickListener { finish() }
                   b.btnExitApp.setOnClickListener { exitApp() }
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
@@ -2268,82 +1728,35 @@ jobs:
 
               private fun showLogDialog() {
                   val log = CrashLogger.readAll(this)
-                  AlertDialog.Builder(this)
-                      .setTitle("Лог приложения")
-                      .setMessage(log.takeLast(3000))
-                      .setPositiveButton("Скопировать") { _, _ ->
-                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                          clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
-                          Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
-                      }
-                      .setNegativeButton("Закрыть", null)
-                      .show()
+                  AlertDialog.Builder(this).setTitle("Лог приложения").setMessage(log.takeLast(3000))
+                      .setPositiveButton("Скопировать") { _, _ -> val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager; clipboard.setPrimaryClip(ClipData.newPlainText("log", log)); Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show() }
+                      .setNegativeButton("Закрыть", null).show()
               }
 
               private fun setupFocusHighlight() {
                   listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->
-                      tv.setOnFocusChangeListener { _, hasFocus ->
-                          tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
-                      }
+                      tv.setOnFocusChangeListener { _, hasFocus -> tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE) }
                   }
               }
 
               private fun toggleAspect() {
-                  currentResizeMode = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
-                      AspectRatioFrameLayout.RESIZE_MODE_FIT
-                  } else {
-                      AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                  }
+                  currentResizeMode = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) AspectRatioFrameLayout.RESIZE_MODE_FIT else AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                   b.playerView.resizeMode = currentResizeMode
                   b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
                   CrashLogger.info("Player", "Формат: ${b.btnAspect.text}")
               }
 
-              private fun exitApp() {
-                  handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
-                  finishAffinity()
-                  android.os.Process.killProcess(android.os.Process.myPid())
-              }
+              private fun exitApp() { handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null; finishAffinity(); android.os.Process.killProcess(android.os.Process.myPid()) }
 
               private fun handleMenuNavigation(keyCode: Int): Boolean {
                   val cur = currentFocus ?: run { b.btnPlayPause.requestFocus(); return true }
                   val nextId: Int? = when (cur.id) {
-                      R.id.btnPlayPause -> when (keyCode) {
-                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
-                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
-                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnQuality
-                          else -> null
-                      }
-                      R.id.btnSleepTimer -> when (keyCode) {
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
-                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnExitApp
-                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
-                          else -> null
-                      }
-                      R.id.btnBack -> when (keyCode) {
-                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnExitApp
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
-                          else -> null
-                      }
-                      R.id.btnExitApp -> when (keyCode) {
-                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
-                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnSleepTimer
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
-                          else -> null
-                      }
-                      R.id.btnQuality -> when (keyCode) {
-                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnAspect
-                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
-                          else -> null
-                      }
-                      R.id.btnAspect -> when (keyCode) {
-                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnQuality
-                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
-                          else -> null
-                      }
+                      R.id.btnPlayPause -> when (keyCode) { KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer; KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack; KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality; KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnQuality; else -> null }
+                      R.id.btnSleepTimer -> when (keyCode) { KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause; KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnExitApp; KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality; else -> null }
+                      R.id.btnBack -> when (keyCode) { KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnExitApp; KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause; else -> null }
+                      R.id.btnExitApp -> when (keyCode) { KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack; KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnSleepTimer; KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause; else -> null }
+                      R.id.btnQuality -> when (keyCode) { KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer; KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnAspect; KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause; else -> null }
+                      R.id.btnAspect -> when (keyCode) { KeyEvent.KEYCODE_DPAD_UP -> R.id.btnQuality; KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause; KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause; else -> null }
                       else -> null
                   }
                   if (nextId != null) { findViewById<View>(nextId)?.requestFocus(); return true }
@@ -2351,27 +1764,13 @@ jobs:
               }
 
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                  if (b.channelListPanel.visibility == View.VISIBLE) {
-                      if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
-                          b.channelListPanel.visibility = View.GONE
-                          showControls()
-                          return true
-                      }
-                      return super.dispatchKeyEvent(event)
-                  }
+                  if (b.channelListPanel.visibility == View.VISIBLE) { if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) { b.channelListPanel.visibility = View.GONE; showControls(); return true }; return super.dispatchKeyEvent(event) }
                   if (b.controlsOverlay.visibility == View.VISIBLE) {
                       if (event.action == KeyEvent.ACTION_DOWN) {
                           when (event.keyCode) {
                               KeyEvent.KEYCODE_BACK -> { hideControlsRunnable.run(); return true }
-                              KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                                  (currentFocus as? View)?.performClick(); resetHideTimeout(); return true
-                              }
-                              KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
-                              KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                  val handled = handleMenuNavigation(event.keyCode)
-                                  if (handled) { resetHideTimeout(); return true }
-                                  return true
-                              }
+                              KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { (currentFocus as? View)?.performClick(); resetHideTimeout(); return true }
+                              KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> { val handled = handleMenuNavigation(event.keyCode); if (handled) { resetHideTimeout(); return true }; return true }
                           }
                       }
                       return true
@@ -2387,69 +1786,40 @@ jobs:
                   return super.dispatchKeyEvent(event)
               }
 
-              private fun resetHideTimeout() {
-                  handler.removeCallbacks(hideControlsRunnable)
-                  handler.postDelayed(hideControlsRunnable, 5000)
-              }
+              private fun resetHideTimeout() { handler.removeCallbacks(hideControlsRunnable); handler.postDelayed(hideControlsRunnable, 5000) }
 
               private fun showChannelList() {
                   val channels = names.mapIndexed { i, n -> Channel(n, urls.getOrNull(i) ?: "", "") }
-                  b.channelListPanel.visibility = View.VISIBLE
-                  b.controlsOverlay.visibility = View.GONE
-                  b.rightControls.visibility = View.GONE
-                  b.btnSleepTimer.visibility = View.GONE
-                  b.leftControls.visibility = View.GONE
+                  b.channelListPanel.visibility = View.VISIBLE; b.controlsOverlay.visibility = View.GONE; b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
                   b.channelListRecycler.layoutManager = LinearLayoutManager(this)
-                  b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
-                      val idx = urls.indexOf(ch.url)
-                      if (idx >= 0) { currentIndex = idx; startPlayback() }
-                      b.channelListPanel.visibility = View.GONE
-                  }
+                  b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch -> val idx = urls.indexOf(ch.url); if (idx >= 0) { currentIndex = idx; startPlayback() }; b.channelListPanel.visibility = View.GONE }
                   b.channelListRecycler.scrollToPosition(currentIndex)
                   b.channelListRecycler.post { b.channelListRecycler.findViewHolderForAdapterPosition(currentIndex)?.itemView?.requestFocus() }
               }
 
-              private fun switchChannel(direction: Int) {
-                  val newIndex = currentIndex + direction
-                  if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() }
-              }
+              private fun switchChannel(direction: Int) { val newIndex = currentIndex + direction; if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() } }
 
               private fun startPlayback() {
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
-                  val chNum = currentIndex + 1
-                  val chName = names.getOrNull(currentIndex) ?: "Канал"
+                  val chNum = currentIndex + 1; val chName = names.getOrNull(currentIndex) ?: "Канал"
                   CrashLogger.info("Player", "Открытие #$chNum: $chName")
-                  b.channelNameOverlay.text = "$chNum. $chName"
-                  b.channelNameOverlay.visibility = View.VISIBLE
-                  handler.removeCallbacks(hideChannelOverlayRunnable)
-                  handler.postDelayed(hideChannelOverlayRunnable, 3000)
-                  b.errorLayout.visibility = View.GONE
-                  retryCount = 0
+                  b.channelNameOverlay.text = "$chNum. $chName"; b.channelNameOverlay.visibility = View.VISIBLE
+                  handler.removeCallbacks(hideChannelOverlayRunnable); handler.postDelayed(hideChannelOverlayRunnable, 3000)
+                  b.errorLayout.visibility = View.GONE; retryCount = 0
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
                   if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
-                  if (!NetworkUtils.isOnline(this)) {
-                      b.progress.visibility = View.GONE
-                      b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."
-                      b.errorLayout.visibility = View.VISIBLE
-                      CrashLogger.info("Player", "Нет интернета")
-                      return
-                  }
+                  if (!NetworkUtils.isOnline(this)) { b.progress.visibility = View.GONE; b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."; b.errorLayout.visibility = View.VISIBLE; CrashLogger.info("Player", "Нет интернета"); return }
                   b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
                       val direct = StreamResolver.resolve(channelUrl)
                       if (direct.startsWith("ERROR")) { handleError(direct); return@launch }
-                      StreamCache.put(this@PlayerActivity, channelUrl, direct)
-                      play(direct)
+                      StreamCache.put(this@PlayerActivity, channelUrl, direct); play(direct)
                   }
               }
 
               private fun buildHttpDataSource(): OkHttpDataSource.Factory {
-                  val okHttp = OkHttpClient.Builder()
-                      .connectTimeout(10, TimeUnit.SECONDS)
-                      .readTimeout(30, TimeUnit.SECONDS)
-                      .dns(DohProvider.createWithFallback(this))
-                      .build()
+                  val okHttp = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).dns(DohProvider.createWithFallback(this)).build()
                   return OkHttpDataSource.Factory(okHttp)
                       .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                       .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
@@ -2464,34 +1834,15 @@ jobs:
                       setMediaSource(HlsMediaSource.Factory(dataSource).createMediaSource(MediaItem.fromUri(m3u8)))
                       playWhenReady = true; prepare()
                       addListener(object : Player.Listener {
-                          override fun onTracksChanged(tracks: Tracks) {
-                              updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE
-                              CrashLogger.info("Player", "Воспроизведение началось")
-                          }
-                          override fun onPlayerError(error: PlaybackException) {
-                              super.onPlayerError(error)
-                              CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})")
-                              urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
-                              handleError("Ошибка плеера: ${error.errorCodeName}")
-                          }
+                          override fun onTracksChanged(tracks: Tracks) { updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE; CrashLogger.info("Player", "Воспроизведение началось") }
+                          override fun onPlayerError(error: PlaybackException) { super.onPlayerError(error); CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})"); urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }; handleError("Ошибка плеера: ${error.errorCodeName}") }
                       })
                   }
-                  b.playerView.player = player
-                  b.progress.visibility = View.GONE
-                  b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-                  showControls()
+                  b.playerView.player = player; b.progress.visibility = View.GONE; b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause); showControls()
                   b.btnQuality.setOnClickListener { showQualityDialog(); resetHideTimeout() }
                   b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
-                  b.btnPlayPause.setOnClickListener {
-                      player?.let { p ->
-                          if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) }
-                          else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) }
-                      }
-                      resetHideTimeout()
-                  }
-                  b.touchArea.setOnClickListener {
-                      if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls()
-                  }
+                  b.btnPlayPause.setOnClickListener { player?.let { p -> if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) } else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) } }; resetHideTimeout() }
+                  b.touchArea.setOnClickListener { if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls() }
               }
 
               private fun updateQualityButton(tracks: Tracks) {
@@ -2500,16 +1851,14 @@ jobs:
                   val format = videoGroup.getTrackFormat(selectedIndex)
                   val height = if (format.height > 0) "${format.height}p" else "Auto"
                   val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
-                  b.btnQuality.text = height + bitrate
-                  CrashLogger.info("Player", "Качество: $height${bitrate}")
+                  b.btnQuality.text = height + bitrate; CrashLogger.info("Player", "Качество: $height${bitrate}")
               }
 
               private fun showQualityDialog() {
                   val p = player ?: return
                   val tracks = p.currentTracks
                   val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
-                  val qualities = mutableListOf<String>(); qualities.add("Авто (Auto)")
-                  val formats = mutableListOf<androidx.media3.common.Format>()
+                  val qualities = mutableListOf<String>(); qualities.add("Авто (Auto)"); val formats = mutableListOf<androidx.media3.common.Format>()
                   var selectedTrackIndex = -1
                   for (i in 0 until videoGroup.length) { if (videoGroup.isTrackSelected(i)) { selectedTrackIndex = i; break } }
                   for (i in 0 until videoGroup.length) {
@@ -2526,19 +1875,11 @@ jobs:
 
               private fun handleError(errorText: String? = null) {
                   if (retryCount < MAX_RETRIES) {
-                      retryCount++
-                      b.progress.visibility = View.VISIBLE
-                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES")
-                      handler.postDelayed({ startPlayback() }, RETRY_DELAY)
+                      retryCount++; b.progress.visibility = View.VISIBLE; CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES"); handler.postDelayed({ startPlayback() }, RETRY_DELAY)
                   } else {
-                      b.progress.visibility = View.GONE
-                      val details = errorText ?: "Неизвестная ошибка"
-                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"
-                      b.errorLayout.visibility = View.VISIBLE
-                      b.controlsOverlay.visibility = View.GONE
-                      b.rightControls.visibility = View.GONE
-                      b.btnSleepTimer.visibility = View.GONE
-                      b.leftControls.visibility = View.GONE
+                      b.progress.visibility = View.GONE; val details = errorText ?: "Неизвестная ошибка"
+                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"; b.errorLayout.visibility = View.VISIBLE
+                      b.controlsOverlay.visibility = View.GONE; b.rightControls.visibility = View.GONE; b.btnSleepTimer.visibility = View.GONE; b.leftControls.visibility = View.GONE
                       CrashLogger.error("Player", "Все попытки исчерпаны")
                   }
               }
@@ -2546,25 +1887,15 @@ jobs:
               private fun showSleepTimerDialog() {
                   val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
                   val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
-                  AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which ->
-                      val mins = minutes[which]
-                      if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
-                  }.show()
+                  AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which -> val mins = minutes[which]; if (mins == 0) cancelSleepTimer() else startSleepTimer(mins) }.show()
               }
 
               private fun startSleepTimer(minutes: Int) {
-                  sleepTimer?.cancel()
-                  CrashLogger.info("Player", "Сон: $minutes мин")
+                  sleepTimer?.cancel(); CrashLogger.info("Player", "Сон: $minutes мин")
                   val millis = minutes * 60 * 1000L
                   sleepTimer = object : CountDownTimer(millis, 1000) {
-                      override fun onTick(millisUntilFinished: Long) {
-                          val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60
-                          b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
-                      }
-                      override fun onFinish() {
-                          CrashLogger.info("Player", "Таймер сработал — выключение")
-                          exitApp()
-                      }
+                      override fun onTick(millisUntilFinished: Long) { val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60; b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B")) }
+                      override fun onFinish() { CrashLogger.info("Player", "Таймер сработал — выключение"); exitApp() }
                   }.start()
                   resetHideTimeout()
               }
@@ -2572,17 +1903,12 @@ jobs:
               private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
 
               private fun showControls() {
-                  b.controlsOverlay.visibility = View.VISIBLE
-                  b.rightControls.visibility = View.VISIBLE
-                  b.btnSleepTimer.visibility = View.VISIBLE
-                  b.leftControls.visibility = View.VISIBLE
-                  b.btnPlayPause.post { b.btnPlayPause.requestFocus() }
-                  resetHideTimeout()
+                  b.controlsOverlay.visibility = View.VISIBLE; b.rightControls.visibility = View.VISIBLE; b.btnSleepTimer.visibility = View.VISIBLE; b.leftControls.visibility = View.VISIBLE
+                  b.btnPlayPause.post { b.btnPlayPause.requestFocus() }; resetHideTimeout()
               }
 
               override fun onDestroy() {
-                  super.onDestroy()
-                  CrashLogger.info("Player", "Закрытие")
+                  super.onDestroy(); CrashLogger.info("Player", "Закрытие")
                   handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
               }
           }
@@ -2593,7 +1919,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: DoH (AdGuard) with automatic fallback to system DNS" || echo "no changes"
+          git commit -m "fix: add media3-datasource-okhttp dependency for OkHttpDataSource" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2630,24 +1956,11 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🌐 **DNS-over-HTTPS (AdGuard) с фолбэком:**
+            🔧 **Исправлена ошибка сборки:**
 
-            **Как работает:**
-            - Все запросы приложения (VK API, логотипы, GitHub) идут через **DoH** `https://dns.adguard-dns.com/dns-query`.
-            - Если AdGuard недоступен или вернул пустой результат — **автоматический фолбэк** на системный DNS (тот, что даёт интернет-провайдер).
-            - **Видеопоток VK идёт напрямую с CDN** (DoH применяется только к API/метаданным, не к самому видео).
+            Добавлена зависимость `androidx.media3:media3-datasource-okhttp:1.4.1`, которая требуется для работы `OkHttpDataSource` (используется для DoH в плеере).
 
-            **Проверка в логе:**
-            ```
-            [DoH] ✅ DoH работает
-            [DoH] Ошибка DoH для api.vkvideo.ru: timeout — фолбэк на системный DNS
-            [DoH] Пустой ответ для doubleclick.net — фолбэк на системный DNS
-            ```
-
-            **Безопасность:**
-            - DoH не трогает видеопоток → воспроизведение не ломается.
-            - При недоступности AdGuard — тихий фолбэк → приложение работает как обычно.
-            - Вся логика в `DohProvider.kt` — можно отключить одной правкой.
+            Без неё сборка падала с ошибкой `Unresolved reference: OkHttpDataSource`.
 
             📦 Скачайте APK ниже и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
