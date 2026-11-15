@@ -29,7 +29,7 @@ class SettingsActivity : AppCompatActivity() {
         b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
         b.txtAbout.text = """
             Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
-            
+
             🎯 ВОЗМОЖНОСТИ:
             • Просмотр VK Live в высоком качестве
             • Автоподгрузка списка каналов
@@ -41,22 +41,24 @@ class SettingsActivity : AppCompatActivity() {
             • Ручное обновление (⬇️ в шапке)
             • Умное кэширование + автоочистка
             • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
-            • Диагностика DoH прямо в настройках
+            • Тумблер DoH + диагностика
             • Подробный лог
-            
+
             ⚙️ ТЕХНОЛОГИИ:
             • Резолвер: yt-dlp (Python + Chaquopy)
             • Плеер: Media3 (ExoPlayer)
             • Сборка: GitHub Actions
-            
+
             ❤️ Сделано для семьи и друзей.
         """.trimIndent()
 
         updateCacheInfo()
+        updateDohToggleUI()
 
         b.btnBack.setOnClickListener { finish() }
         b.btnCheckUpdate.setOnClickListener { checkUpdate() }
         b.btnCheckDoh.setOnClickListener { runDohDiagnostics() }
+        b.btnToggleDoh.setOnClickListener { toggleDoh() }
 
         b.btnClearCache.setOnClickListener {
             val imageLoader = Coil.imageLoader(this)
@@ -73,7 +75,7 @@ class SettingsActivity : AppCompatActivity() {
         b.btnFullReset.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Полный сброс")
-                .setMessage("Будут удалены:\n\n• Избранное\n• Последний канал\n• Все кэши\n• Лог\n\nПриложение не удалится. Продолжить?")
+                .setMessage("Будут удалены:\n\n• Избранное\n• Последний канал\n• Все кэши\n• Лог\n• Настройка DoH (вернётся ВКЛ)\n\nПриложение не удалится. Продолжить?")
                 .setPositiveButton("Сбросить") { _, _ -> performFullReset() }
                 .setNegativeButton("Отмена", null)
                 .show()
@@ -102,6 +104,87 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateDohToggleUI() {
+        val enabled = DohSettings.isEnabled(this)
+        if (enabled) {
+            b.btnToggleDoh.text = "🟢 AdGuard DoH: ВКЛ"
+            b.btnToggleDoh.setTextColor(Color.parseColor("#FF4ADE80"))
+        } else {
+            b.btnToggleDoh.text = "🔴 AdGuard DoH: ВЫКЛ"
+            b.btnToggleDoh.setTextColor(Color.parseColor("#FFFF6B6B"))
+        }
+    }
+
+    private fun toggleDoh() {
+        val newState = !DohSettings.isEnabled(this)
+        b.btnToggleDoh.isEnabled = false
+        b.btnToggleDoh.text = "⏳ Применение..."
+        b.btnToggleDoh.setTextColor(Color.parseColor("#FF8A8D93"))
+
+        lifecycleScope.launch {
+            // 1) Kotlin-флаг — сохраняем сразу. Все новые lookup() увидят его мгновенно,
+            //    т.к. createWithFallback всегда возвращает обёртку, а обёртка смотрит на флаг.
+            DohSettings.setEnabled(this@SettingsActivity, newState)
+
+            // 2) Python-флаг с ретраями + проверка через doh_health().enabled
+            val pyOk = withContext(Dispatchers.IO) { syncPythonDohFlag(newState) }
+
+            // 3) Coil: ImageLoader уже создан и держит OkHttpClient с обёрткой.
+            //    Обёртка смотрит на флаг динамически — это само по себе достаточно.
+            //    Но для чистоты пересоздаём ImageLoader на случай кэшей внутри клиента.
+            try {
+                Coil.reset()
+                CrashLogger.info("DoH", "Coil.reset() — ImageLoader пересоздан с новым состоянием")
+            } catch (e: Exception) {
+                CrashLogger.error("DoH", "Coil.reset() не удался", e)
+            }
+
+            // 4) Откат при неудаче Python-синхронизации (чтобы Kotlin и Python не разъехались)
+            if (!pyOk) {
+                DohSettings.setEnabled(this@SettingsActivity, !newState)
+                if (!newState) DohProvider.invalidate()  // был выключен — включаем обратно
+                try { Coil.reset() } catch (_: Exception) {}
+                updateDohToggleUI()
+                Toast.makeText(
+                    this@SettingsActivity,
+                    "❌ Python не ответил. Состояние не изменено.",
+                    Toast.LENGTH_LONG
+                ).show()
+                CrashLogger.error("DoH", "Откат: синхронизация с Python провалена")
+            } else {
+                updateDohToggleUI()
+                Toast.makeText(
+                    this@SettingsActivity,
+                    if (newState) "🟢 AdGuard DoH включён везде — HTTPS" else "🔴 AdGuard DoH выключен везде — системный DNS",
+                    Toast.LENGTH_LONG
+                ).show()
+                CrashLogger.info("DoH", "Тумблер применён: enabled=$newState")
+            }
+            b.btnToggleDoh.isEnabled = true
+        }
+    }
+
+    private fun syncPythonDohFlag(enabled: Boolean): Boolean {
+        for (attempt in 0 until 3) {
+            try {
+                val m = com.chaquo.python.Python.getInstance().getModule("resolver")
+                m.callAttr("set_doh_enabled", enabled)
+                val health = m.callAttr("doh_health").toString()
+                val pyEnabled = Regex("'enabled':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
+                if (pyEnabled == enabled) {
+                    CrashLogger.info("DoH", "✅ Python применён: enabled=$enabled (попытка ${attempt + 1})")
+                    return true
+                }
+                CrashLogger.info("DoH", "Python-флаг не совпал (попытка ${attempt + 1}): ожидали $enabled")
+            } catch (e: Exception) {
+                CrashLogger.error("DoH", "Ошибка синхронизации Python (попытка ${attempt + 1})", e)
+            }
+            try { Thread.sleep(200) } catch (_: InterruptedException) {}
+        }
+        CrashLogger.error("DoH", "❌ Python НЕ применён после 3 попыток")
+        return false
+    }
+
     private fun runDohDiagnostics() {
         b.txtDohResult.text = "⏳ Проверка DoH, подождите..."
         b.btnCheckDoh.isEnabled = false
@@ -123,14 +206,20 @@ class SettingsActivity : AppCompatActivity() {
         try {
             getSharedPreferences("tvplayer", MODE_PRIVATE).edit().clear().apply()
             getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
+            getSharedPreferences("doh_settings", MODE_PRIVATE).edit().clear().apply()
             ChannelCache.clear(this)
             CrashLogger.clear(this)
             val il = Coil.imageLoader(this)
             il.diskCache?.clear()
             il.memoryCache?.clear()
             cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            Toast.makeText(this, "Полный сброс выполнен", Toast.LENGTH_SHORT).show()
-            CrashLogger.info("Settings", "Полный сброс: всё очищено")
+            // Сбросили prefs → DoH вернулся в default (true)
+            DohProvider.invalidate()
+            try { Coil.reset() } catch (_: Exception) {}
+            lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }
+            updateDohToggleUI()
+            Toast.makeText(this, "Полный сброс выполнен (DoH включён)", Toast.LENGTH_SHORT).show()
+            CrashLogger.info("Settings", "Полный сброс: всё очищено, DoH в default=true")
             updateCacheInfo()
         } catch (e: Exception) {
             CrashLogger.error("Settings", "Ошибка полного сброса", e)

@@ -4,13 +4,18 @@ import urllib.request
 
 DOH_URL = "https://dns.adguard-dns.com/dns-query"
 DOH_HOSTS = {"dns.adguard-dns.com", "dns.google", "cloudflare-dns.com", "dns.quad9.net"}
-DOH_TIMEOUT = 2
+DOH_TIMEOUT = 1.5
+DOH_SLOW_THRESHOLD = 1.2
 DNS_CACHE = {}
 DNS_TTL = 300
 _doh_fail_until = 0.0
 _doh_consecutive_fails = 0
 _DOH_MAX_FAILS = 3
 _DOH_COOLDOWN = 60
+_doh_enabled = True
+_doh_slow_count = 0
+_doh_resolved_count = 0
+_system_fallback_count = 0
 
 try:
     import dns.message
@@ -20,6 +25,14 @@ except Exception:
     _DNS_AVAILABLE = False
 
 _orig_getaddrinfo = socket.getaddrinfo
+
+def set_doh_enabled(enabled):
+    global _doh_enabled, _doh_slow_count, _doh_consecutive_fails
+    _doh_enabled = bool(enabled)
+    if not _doh_enabled:
+        DNS_CACHE.clear()
+        _doh_slow_count = 0
+        _doh_consecutive_fails = 0
 
 def _doh_lookup(host, timeout=DOH_TIMEOUT):
     q = dns.message.make_query(host, dns.rdatatype.A)
@@ -43,12 +56,14 @@ def _doh_lookup(host, timeout=DOH_TIMEOUT):
     return ips
 
 def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    global _doh_fail_until, _doh_consecutive_fails
-    if not _DNS_AVAILABLE or host in DOH_HOSTS:
+    global _doh_fail_until, _doh_consecutive_fails, _doh_slow_count, _doh_resolved_count, _system_fallback_count
+    if not _doh_enabled or not _DNS_AVAILABLE or host in DOH_HOSTS:
+        _system_fallback_count += 1
         return _orig_getaddrinfo(host, port, family, type, proto, flags)
     if family not in (0, socket.AF_INET):
         return _orig_getaddrinfo(host, port, family, type, proto, flags)
     if time.time() < _doh_fail_until:
+        _system_fallback_count += 1
         return _orig_getaddrinfo(host, port, family, type, proto, flags)
     now = time.time()
     cached = DNS_CACHE.get(host)
@@ -56,16 +71,27 @@ def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         ips = cached[0]
     else:
         try:
+            started = time.time()
             ips = _doh_lookup(host)
+            elapsed = time.time() - started
+            if elapsed > DOH_SLOW_THRESHOLD:
+                _doh_slow_count += 1
+                if _doh_slow_count >= 3:
+                    _doh_fail_until = time.time() + _DOH_COOLDOWN
+            else:
+                _doh_slow_count = 0
             if not ips:
                 _doh_consecutive_fails = 0
+                _system_fallback_count += 1
                 return _orig_getaddrinfo(host, port, family, type, proto, flags)
             DNS_CACHE[host] = (ips, now)
             _doh_consecutive_fails = 0
+            _doh_resolved_count += 1
         except Exception:
             _doh_consecutive_fails += 1
             if _doh_consecutive_fails >= _DOH_MAX_FAILS:
                 _doh_fail_until = time.time() + _DOH_COOLDOWN
+            _system_fallback_count += 1
             return _orig_getaddrinfo(host, port, family, type, proto, flags)
     result = []
     for ip in ips:
@@ -74,6 +100,7 @@ def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         except Exception:
             pass
     if not result:
+        _system_fallback_count += 1
         return _orig_getaddrinfo(host, port, family, type, proto, flags)
     return result
 
@@ -82,10 +109,14 @@ socket.getaddrinfo = _doh_getaddrinfo
 def doh_health():
     return {
         "available": _DNS_AVAILABLE,
+        "enabled": _doh_enabled,
         "consecutive_fails": _doh_consecutive_fails,
         "cooldown_active": time.time() < _doh_fail_until,
         "cooldown_remaining": max(0, int(_doh_fail_until - time.time())),
         "cache_size": len(DNS_CACHE),
+        "doh_resolved": _doh_resolved_count,
+        "system_fallback": _system_fallback_count,
+        "slow_count": _doh_slow_count,
     }
 
 import yt_dlp

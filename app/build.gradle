@@ -13,7 +13,7 @@ android {
         applicationId = "com.tvplayer.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 42
+        versionCode = 43
         versionName = "1.0"
         buildConfigField "String", "GITHUB_REPO", "\"${System.getenv('GITHUB_REPOSITORY') ?: 'user/tvplayer'}\""
         ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
@@ -49,7 +49,7 @@ chaquopy {
         version = "3.11"
         pip {
             install("yt-dlp")
-            install("dnspython")
+            install("dnspython==2.6.1")
         }
     }
 }

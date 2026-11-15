@@ -60,6 +60,7 @@ object UpdateChecker {
                 .dns(DohProvider.createWithFallback(context))
                 .build()
             val req = Request.Builder().url(url).build()
+            val started = System.currentTimeMillis()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}")
@@ -69,7 +70,13 @@ object UpdateChecker {
                 resp.body?.byteStream()?.use { input ->
                     file.outputStream().use { output -> input.copyTo(output) }
                 }
-                CrashLogger.info("OTA", "✓ APK скачан: ${file.length() / 1024 / 1024} МБ")
+                val elapsed = System.currentTimeMillis() - started
+                val sizeMb = file.length() / 1024 / 1024
+                val speedKbps = if (elapsed > 0) (file.length() / 1024) * 1000 / elapsed else 0
+                CrashLogger.info("OTA", "✓ APK скачан: ${sizeMb} МБ за ${elapsed/1000}с (${speedKbps} КБ/с)")
+                if (speedKbps < 200) {
+                    CrashLogger.info("OTA", "⚠️ Медленная загрузка — возможен троттлинг AdGuard DoH")
+                }
                 file
             }
         } catch (e: Exception) {

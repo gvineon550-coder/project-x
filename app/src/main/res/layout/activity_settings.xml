@@ -123,6 +123,20 @@
                     android:lineSpacingExtra="4dp"
                     android:paddingBottom="12dp" />
                 <TextView
+                    android:id="@+id/btnToggleDoh"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🟢 AdGuard DoH: ВКЛ"
+                    android:textColor="#FF4ADE80"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:padding="16dp"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:background="@drawable/tile_selector"
+                    android:layout_marginBottom="8dp" />
+                <TextView
                     android:id="@+id/txtDohResult"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

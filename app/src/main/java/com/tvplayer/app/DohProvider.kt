@@ -11,18 +11,33 @@ import java.net.UnknownHostException
 
 object DohProvider {
     private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
-    private const val TEST_DOMAIN = "example.com"
+    private const val TEST_DOMAIN = "wikipedia.org"
 
     @Volatile private var cached: Dns? = null
+    @Volatile private var cachedContext: Context? = null
 
+    // ВАЖНО: НЕ возвращаем Dns.SYSTEM напрямую при выключке.
+    // Возвращаем обёртку, которая смотрит на флаг на каждом lookup().
+    // Это позволяет переключать тумблер в обе стороны без перезапуска
+    // — в том числе для уже созданных клиентов (Coil, OkHttp пулы).
     fun createWithFallback(context: Context): Dns {
-        cached?.let { return it }
+        val appCtx = context.applicationContext
+        cached?.let { if (cachedContext === appCtx) return it }
         synchronized(this) {
-            cached?.let { return it }
-            val created = build(context.applicationContext)
+            cached?.let { if (cachedContext === appCtx) return it }
+            val created = build(appCtx)
             cached = created
+            cachedContext = appCtx
             return created
         }
+    }
+
+    fun invalidate() {
+        synchronized(this) {
+            cached = null
+            cachedContext = null
+        }
+        CrashLogger.info("DoH", "Кэш DohProvider сброшен")
     }
 
     private fun build(context: Context): Dns {
@@ -42,14 +57,15 @@ object DohProvider {
 
         return object : Dns {
             override fun lookup(hostname: String): List<InetAddress> {
-                if (doh != null) {
-                    try {
-                        val result = doh.lookup(hostname)
-                        if (result.isNotEmpty()) return result
-                        CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
-                    } catch (e: Exception) {
-                        CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк на системный DNS")
-                    }
+                if (!DohSettings.isEnabled(context) || doh == null) {
+                    return Dns.SYSTEM.lookup(hostname)
+                }
+                try {
+                    val result = doh.lookup(hostname)
+                    if (result.isNotEmpty()) return result
+                    CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
+                } catch (e: Exception) {
+                    CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк")
                 }
                 return try {
                     Dns.SYSTEM.lookup(hostname)
@@ -62,6 +78,10 @@ object DohProvider {
     }
 
     fun testDoh(context: Context): Boolean {
+        if (!DohSettings.isEnabled(context.applicationContext)) {
+            CrashLogger.info("DoH", "Pre-flight пропущен (DoH выключен)")
+            return false
+        }
         return try {
             val client = OkHttpClient.Builder().build()
             val doh = DnsOverHttps.Builder()
@@ -76,7 +96,7 @@ object DohProvider {
                 CrashLogger.info("DoH", "✅ DoH AdGuard работает ($TEST_DOMAIN → ${result.first().hostAddress}, ${elapsed}мс)")
                 true
             } else {
-                CrashLogger.info("DoH", "⚠️ DoH AdGuard вернул пустой ответ для $TEST_DOMAIN (${elapsed}мс)")
+                CrashLogger.info("DoH", "⚠️ DoH AdGuard вернул пустой ответ для $TEST_DOMAIN")
                 false
             }
         } catch (e: Exception) {
@@ -85,8 +105,6 @@ object DohProvider {
         }
     }
 
-    // ==================== ДИАГНОСТИКА ====================
-
     data class TestResult(
         val name: String,
         val ok: Boolean,
@@ -94,6 +112,12 @@ object DohProvider {
         val latencyMs: Long = 0L,
         val error: String? = null
     )
+
+    private fun isSuspiciousIp(ip: String): String? = when {
+        ip == "0.0.0.0" || ip == "127.0.0.1" -> "AdGuard заблокировал (блок-страница)"
+        ip.startsWith("8.6.") -> "AdGuard перенаправил на блок-страницу"
+        else -> null
+    }
 
     private fun tryResolveDoH(host: String): TestResult {
         val started = System.currentTimeMillis()
@@ -107,7 +131,13 @@ object DohProvider {
             val result = doh.lookup(host)
             val elapsed = System.currentTimeMillis() - started
             if (result.isNotEmpty()) {
-                TestResult(name = host, ok = true, detail = "$host → ${result.first().hostAddress}", latencyMs = elapsed)
+                val ip = result.first().hostAddress
+                val suspicious = isSuspiciousIp(ip)
+                if (suspicious != null) {
+                    TestResult(name = host, ok = false, detail = "$host → $ip", latencyMs = elapsed, error = suspicious)
+                } else {
+                    TestResult(name = host, ok = true, detail = "$host → $ip", latencyMs = elapsed)
+                }
             } else {
                 TestResult(name = host, ok = false, detail = "пустой ответ", latencyMs = elapsed, error = "NXDOMAIN или блокировка")
             }
@@ -138,15 +168,18 @@ object DohProvider {
             val health = m.callAttr("doh_health").toString()
             val elapsed = System.currentTimeMillis() - started
             val available = Regex("'available':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
+            val enabled = Regex("'enabled':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
             val cooldown = Regex("'cooldown_active':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
             val fails = Regex("'consecutive_fails':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
             val cacheSize = Regex("'cache_size':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
-            if (available && !cooldown) {
-                TestResult(name = "Python DoH", ok = true, detail = "доступен · ошибок: $fails · кэш: $cacheSize", latencyMs = elapsed)
-            } else if (available && cooldown) {
-                TestResult(name = "Python DoH", ok = false, detail = "в режиме ожидания (circuit breaker)", latencyMs = elapsed, error = "ошибок подряд: $fails")
-            } else {
-                TestResult(name = "Python DoH", ok = false, detail = "dnspython не загружен", latencyMs = elapsed, error = "Python-DoH недоступен")
+            val dohResolved = Regex("'doh_resolved':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+            val fallback = Regex("'system_fallback':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+            val slowCount = Regex("'slow_count':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+            when {
+                !enabled -> TestResult(name = "Python DoH", ok = false, detail = "выключен переключателем", latencyMs = elapsed)
+                !available -> TestResult(name = "Python DoH", ok = false, detail = "dnspython не загружен", latencyMs = elapsed, error = "Python-DoH недоступен")
+                cooldown -> TestResult(name = "Python DoH", ok = false, detail = "circuit breaker активен", latencyMs = elapsed, error = "ошибок: $fails, медленных: $slowCount")
+                else -> TestResult(name = "Python DoH", ok = true, detail = "DoH: $dohResolved · фолбэк: $fallback · кэш: $cacheSize", latencyMs = elapsed)
             }
         } catch (e: Exception) {
             TestResult(name = "Python DoH", ok = false, detail = "не удалось получить статус", latencyMs = System.currentTimeMillis() - started, error = "${e.javaClass.simpleName}: ${e.message}")
@@ -173,6 +206,15 @@ object DohProvider {
 
     fun runFullDiagnostics(context: Context): String {
         val sb = StringBuilder()
+        val enabled = DohSettings.isEnabled(context)
+        sb.append(if (enabled) "🟢 AdGuard DoH: ВКЛ\n\n" else "🔴 AdGuard DoH: ВЫКЛ\n\n")
+        if (!enabled) {
+            sb.append("Переключатель выключен — все запросы идут через системный DNS.\n")
+            sb.append("Включите AdGuard DoH, чтобы выполнить проверку.\n\n")
+            CrashLogger.info("DoH", "Диагностика пропущена (DoH выключен)")
+            return sb.toString()
+        }
+
         var okCount = 0
         var totalCount = 0
 
@@ -203,13 +245,9 @@ object DohProvider {
 
         sb.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
         sb.append("Итог: $okCount/$totalCount ")
-        if (okCount == totalCount) {
-            sb.append("✅\n\n🎉 Все запросы идут через защищённый DNS!")
-        } else if (okCount > 0) {
-            sb.append("⚠️\n\nЧасть запросов идёт через фолбэк. Проверьте соединение.")
-        } else {
-            sb.append("❌\n\nDoH не работает. Все запросы через системный DNS.")
-        }
+        if (okCount == totalCount) sb.append("✅\n\n🎉 Все запросы идут через защищённый DNS!")
+        else if (okCount > 0) sb.append("⚠️\n\nЧасть запросов идёт через фолбэк. Проверьте соединение.")
+        else sb.append("❌\n\nDoH не работает. Все запросы через системный DNS.")
 
         CrashLogger.info("DoH", "Диагностика: $okCount/$totalCount")
         return sb.toString()
