@@ -90,10 +90,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
-    // ═══ РАСШИРЕННАЯ АВТООЧИСТКА ═══
     private fun performStartupCleanup() {
         try {
-            // 1. update.apk (после установки больше не нужен)
             val updateApk = File(cacheDir, "update.apk")
             if (updateApk.exists()) {
                 val sizeMb = updateApk.length() / 1024 / 1024
@@ -101,10 +99,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
             }
 
-            // 2. StreamCache — просроченные
             StreamCache.cleanup(this)
 
-            // 3. Очистка устаревших ключей SharedPreferences (от старой авто-OTA)
             val staleKeys = listOf("last_ota_check", "last_ota_version")
             val editor = prefs.edit()
             var removedKeys = 0
@@ -114,7 +110,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
             }
 
-            // 4. cacheDir — файлы старше 7 дней
             val sevenDays = 7L * 24 * 60 * 60 * 1000
             val now = System.currentTimeMillis()
             var oldRemoved = 0
@@ -136,7 +131,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
             }
 
-            // 5. cacheDir — по общему размеру (>15 МБ)
             var cacheSize = 0L
             cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
             if (cacheSize > 15 * 1024 * 1024) {
@@ -146,7 +140,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 cacheSize = 0L
             }
 
-            // 6. Мониторинг filesDir
             var filesSize = 0L
             filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
             val filesMb = filesSize / 1024 / 1024
@@ -160,14 +153,12 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
             }
 
-            // 7. Свободное место
             val stat = StatFs(filesDir.path)
             val freeMb = stat.availableBytes / 1024 / 1024
             if (freeMb < 100) {
                 CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
             }
 
-            // 8. Итоговые размеры
             CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
         } catch (e: Exception) {
             CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
@@ -212,14 +203,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                         if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
                     } else ch
                 }
-                val fresh = loadChannels(cat, manualWithLogos)
+                val fresh = loadChannels(this@MainActivity, cat, manualWithLogos)
                 b.progress.visibility = View.GONE
                 if (fresh.isNotEmpty()) {
                     val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
                     allChannels = fresh
                     ChannelCache.save(this@MainActivity, fresh)
 
-                    // Синхронизация favorites: удаление мёртвых записей
                     val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
                     val actualUrls = fresh.map { it.url }.toSet()
                     val before = currentFavs.size

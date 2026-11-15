@@ -17,7 +17,11 @@ object UpdateChecker {
             if (repo.isBlank() || repo.contains("user/")) return@withContext null
             CrashLogger.info("OTA", "→ Проверка (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
             val url = "https://api.github.com/repos/$repo/releases/latest"
-            val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .dns(DohProvider.createWithFallback(context))
+                .build()
             val req = Request.Builder().url(url)
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "TVPlayer").build()
@@ -50,7 +54,11 @@ object UpdateChecker {
     suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
         try {
             CrashLogger.info("OTA", "→ Скачивание APK")
-            val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
+            val client = OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .dns(DohProvider.createWithFallback(context))
+                .build()
             val req = Request.Builder().url(url).build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {

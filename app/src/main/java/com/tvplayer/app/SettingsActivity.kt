@@ -14,7 +14,9 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import coil.Coil
 import com.tvplayer.app.databinding.ActivitySettingsBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class SettingsActivity : AppCompatActivity() {
@@ -38,6 +40,7 @@ class SettingsActivity : AppCompatActivity() {
             • Таймер сна (5м – 5ч)
             • Ручное обновление (⬇️ в шапке)
             • Умное кэширование + автоочистка
+            • DNS-over-HTTPS (AdGuard) с фолбэком
             • Подробный лог
             
             ⚙️ ТЕХНОЛОГИИ:

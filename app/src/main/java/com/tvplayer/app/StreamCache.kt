@@ -3,8 +3,8 @@ import android.content.Context
 
 object StreamCache {
     private const val PREFS = "stream_cache"
-    private const val TTL_MS = 2 * 60 * 60 * 1000L  // 2 часа
-    private const val MAX_ENTRIES = 200             // жёсткий лимит
+    private const val TTL_MS = 2 * 60 * 60 * 1000L
+    private const val MAX_ENTRIES = 200
 
     fun get(context: Context, channelUrl: String): String? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -23,7 +23,6 @@ object StreamCache {
     fun put(context: Context, channelUrl: String, m3u8: String) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val all = prefs.all
-        // Эвикция старых записей, если превышен лимит
         if (all.size >= MAX_ENTRIES) {
             val entries = all.entries
                 .filter { it.value is String }

@@ -23,6 +23,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -31,6 +32,8 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.tvplayer.app.databinding.ActivityPlayerBinding
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class PlayerActivity : AppCompatActivity() {
     private lateinit var b: ActivityPlayerBinding
@@ -256,15 +259,24 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun play(m3u8: String) {
-        player?.release()
-        val http = DefaultHttpDataSource.Factory()
+    private fun buildHttpDataSource(): OkHttpDataSource.Factory {
+        val okHttp = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .dns(DohProvider.createWithFallback(this))
+            .build()
+        return OkHttpDataSource.Factory(okHttp)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
+    }
+
+    private fun play(m3u8: String) {
+        player?.release()
+        val dataSource = buildHttpDataSource()
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
         trackSelector = DefaultTrackSelector(this)
         player = ExoPlayer.Builder(this).setTrackSelector(trackSelector).setLoadControl(loadControl).build().apply {
-            setMediaSource(HlsMediaSource.Factory(http).createMediaSource(MediaItem.fromUri(m3u8)))
+            setMediaSource(HlsMediaSource.Factory(dataSource).createMediaSource(MediaItem.fromUri(m3u8)))
             playWhenReady = true; prepare()
             addListener(object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) {
