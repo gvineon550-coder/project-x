@@ -1,69 +1,2835 @@
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("com.chaquo.python")
-}
+name: Build & Release TV Player
 
-android {
-    namespace = "com.tvplayer.app"
-    compileSdk = 34
-    ndkVersion = "26.1.10909125"
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 3 * * 1'
 
-    defaultConfig {
-        applicationId = "com.tvplayer.app"
-        minSdk = 24
-        targetSdk = 34
-        versionCode = 38
-        versionName = "1.0"
-        buildConfigField "String", "GITHUB_REPO", "\"${System.getenv('GITHUB_REPOSITORY') ?: 'user/tvplayer'}\""
-        ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
-    }
-    signingConfigs {
-        create("release") {
-            storeFile = file("${rootDir}/keystore.jks")
-            storePassword = "tvplayer123"
-            keyAlias = "tvplayer"
-            keyPassword = "tvplayer123"
-        }
-    }
-    buildTypes {
-        release {
-            signingConfig = signingConfigs.getByName("release")
-            minifyEnabled false
-        }
-    }
-    buildFeatures { viewBinding = true
-        buildConfig = true }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions { jvmTarget = "17" }
-    sourceSets {
-        getByName("main") { python.srcDirs("src/main/python") }
-    }
-}
+permissions:
+  contents: write
 
-chaquopy {
-    defaultConfig {
-        version = "3.11"
-        pip { install("yt-dlp") }
-    }
-}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
 
-dependencies {
-    implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")
-    implementation("androidx.media3:media3-ui:1.4.1")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
-    implementation("io.coil-kt:coil:2.6.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("androidx.lifecycle:lifecycle-service:2.8.3")
-    implementation("androidx.core:core-splashscreen:1.0.1")
-}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "🔍 Проверка версии yt-dlp"
+        id: checkytdlp
+        run: |
+          LATEST=$(curl -s https://pypi.org/pypi/yt-dlp/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])")
+          LAST_BUILT=$(cat .last_ytdlp_version 2>/dev/null || echo "none")
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$LATEST" = "$LAST_BUILT" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "$LATEST" > .last_ytdlp_version
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+          accept-android-sdk-licenses: true
+
+      - name: Accept licenses
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: "🌐 Pre-flight проверка DoH AdGuard"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          pip install --quiet dnspython
+          python3 - << 'PYEOF'
+          import sys
+          try:
+              import dns.message, dns.query, dns.rdatatype
+          except ImportError as e:
+              print(f"⚠️ dnspython не установлен: {e}")
+              sys.exit(0)
+          try:
+              q = dns.message.make_query("example.com", dns.rdatatype.A)
+              r = dns.query.https(q, "https://dns.adguard-dns.com/dns-query", timeout=10)
+              if r.answer:
+                  print(f"✅ DoH AdGuard работает (example.com → {r.answer[0][0]})")
+              else:
+                  print("⚠️ DoH AdGuard ответил, но без A-записей")
+          except Exception as e:
+              print(f"⚠️ DoH AdGuard недоступен из CI: {type(e).__name__}: {e}")
+              print("   Это НЕ блокирует сборку — в приложении есть фолбэк на системный DNS")
+          try:
+              q2 = dns.message.make_query("doubleclick.net", dns.rdatatype.A)
+              r2 = dns.query.https(q2, "https://dns.adguard-dns.com/dns-query", timeout=10)
+              if r2.answer and any(str(rr) == "0.0.0.0" for rr in r2.answer[0]):
+                  print("✅ DoH AdGuard блокирует рекламу (doubleclick.net → 0.0.0.0)")
+              elif r2.answer:
+                  print(f"ℹ️ DoH AdGuard резолвит doubleclick.net → {r2.answer[0][0]} (без блокировки)")
+              else:
+                  print("ℹ️ DoH AdGuard вернул NXDOMAIN для doubleclick.net (тоже блокировка)")
+          except Exception as e:
+              print(f"ℹ️ Проверка блокировки не удалась: {type(e).__name__}")
+          PYEOF
+
+      - name: "📦 Манифест, иконки, сплэш, фоны, layout"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          pip install --quiet Pillow
+
+          python3 - << 'PYEOF'
+          path = "app/build.gradle"
+          with open(path) as f: txt = f.read()
+          if "buildConfig = true" not in txt:
+              txt = txt.replace("viewBinding = true", "viewBinding = true\n        buildConfig = true")
+          if "GITHUB_REPO" not in txt:
+              txt = txt.replace(
+                  'versionName = "1.0"',
+                  'versionName = "1.0"\n        buildConfigField "String", "GITHUB_REPO", "\\"${System.getenv(\'GITHUB_REPOSITORY\') ?: \'user/tvplayer\'}\\""'
+              )
+          if "core-splashscreen" not in txt:
+              txt = txt.replace(
+                  'implementation("androidx.lifecycle:lifecycle-service:2.8.3")',
+                  'implementation("androidx.lifecycle:lifecycle-service:2.8.3")\n    implementation("androidx.core:core-splashscreen:1.0.1")'
+              )
+          if "okhttp-dnsoverhttps" not in txt or "media3-datasource-okhttp" not in txt:
+              deps = []
+              if "okhttp-dnsoverhttps" not in txt:
+                  deps.append('    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")')
+              if "media3-datasource-okhttp" not in txt:
+                  deps.append('    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")')
+              txt = txt.replace(
+                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
+                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n' + "\n".join(deps)
+              )
+          # dnspython — нужен для wire-формата DNS в Python (DoH через urllib, без httpx)
+          if "dnspython" not in txt:
+              if 'pip { install("yt-dlp") }' in txt:
+                  txt = txt.replace(
+                      'pip { install("yt-dlp") }',
+                      'pip {\n            install("yt-dlp")\n            install("dnspython")\n        }'
+                  )
+              elif 'install("yt-dlp")' in txt:
+                  txt = txt.replace(
+                      'install("yt-dlp")',
+                      'install("yt-dlp")\n            install("dnspython")'
+                  )
+          with open(path, "w") as f: f.write(txt)
+          PYEOF
+
+          python3 - << 'PYEOF'
+          from PIL import Image, ImageDraw
+          import os
+          sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+          for dpi, size in sizes.items():
+              folder = f'app/src/main/res/mipmap-{dpi}'
+              os.makedirs(folder, exist_ok=True)
+              img = Image.new('RGBA', (size, size), (15, 17, 21, 255))
+              draw = ImageDraw.Draw(img)
+              margin = size // 8
+              draw.ellipse([margin, margin, size-margin, size-margin], fill=(37, 99, 235, 255))
+              tx = size // 2 - size // 12
+              ty = size // 2 - size // 6
+              draw.polygon([(tx, ty), (tx, ty + size // 3), (tx + size // 3, size // 2)], fill=(255, 255, 255, 255))
+              img.save(f'{folder}/ic_launcher.png')
+              img.save(f'{folder}/ic_launcher_round.png')
+          PYEOF
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#2563EB"
+                  android:pathData="M54,20 C72.78,20 88,35.22 88,54 C88,72.78 72.78,88 54,88 C35.22,88 20,72.78 20,54 C20,35.22 35.22,20 54,20 Z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M48,42 L48,66 L68,54 Z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/bg" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/bg" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/res/drawable/splash_logo.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="200dp" android:height="200dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#2563EB"
+                  android:pathData="M54,20 C72.78,20 88,35.22 88,54 C88,72.78 72.78,88 54,88 C35.22,88 20,72.78 20,54 C20,35.22 35.22,20 54,20 Z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M48,42 L48,66 L68,54 Z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml << 'EOF'
+          <resources>
+              <style name="Theme.TVPlayer" parent="Theme.AppCompat.NoActionBar">
+                  <item name="android:windowBackground">@color/bg</item>
+                  <item name="android:statusBarColor">@color/bg</item>
+                  <item name="android:navigationBarColor">@color/bg</item>
+                  <item name="android:textColor">@color/text</item>
+              </style>
+              <style name="Theme.TVPlayer.Splash" parent="Theme.SplashScreen">
+                  <item name="windowSplashScreenBackground">@color/bg</item>
+                  <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+                  <item name="postSplashScreenTheme">@style/Theme.TVPlayer</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+              <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+              <uses-feature android:name="android.software.leanback" android:required="false" />
+              <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+              <application
+                  android:allowBackup="false"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:name=".TVPlayerApp"
+                  android:networkSecurityConfig="@xml/network_security_config"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@style/Theme.TVPlayer">
+                  <activity android:name=".MainActivity" android:exported="true"
+                      android:theme="@style/Theme.TVPlayer.Splash"
+                      android:screenOrientation="unspecified">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <activity android:name=".SettingsActivity" android:exported="false"
+                      android:screenOrientation="unspecified" />
+                  <activity android:name=".PlayerActivity" android:exported="false"
+                      android:screenOrientation="sensorLandscape" />
+                  <service android:name=".PlaybackService" android:exported="false"
+                      android:foregroundServiceType="mediaPlayback" />
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/xml/file_paths.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <cache-path name="cache" path="." />
+              <files-path name="files" path="." />
+          </paths>
+          EOF
+
+          cat > app/src/main/res/drawable/button_focus_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FFFFFFFF" />
+                      <stroke android:width="3dp" android:color="#FF2563EB" />
+                      <corners android:radius="8dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#AA000000" />
+                      <corners android:radius="8dp" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          cat > app/src/main/res/drawable/btn_play_pause_focus.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="oval">
+                      <solid android:color="#FF2563EB" />
+                      <stroke android:width="3dp" android:color="#FFFFFFFF" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="oval">
+                      <solid android:color="#00000000" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          cat > app/src/main/res/drawable/card_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF1C1F26" />
+                      <stroke android:width="2dp" android:color="#FFFFFFFF" />
+                      <corners android:radius="14dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF1C1F26" />
+                      <corners android:radius="14dp" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          cat > app/src/main/res/drawable/button_accent_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <selector xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:state_focused="true">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF3B82F6" />
+                      <corners android:radius="12dp" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#FF2563EB" />
+                      <corners android:radius="12dp" />
+                  </shape>
+              </item>
+          </selector>
+          EOF
+
+          cat > app/src/main/res/layout/dialog_update.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:maxHeight="400dp"
+              android:padding="16dp"
+              android:scrollbars="vertical"
+              android:fadeScrollbars="false">
+              <TextView
+                  android:id="@+id/dialogUpdateText"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:textColor="#FFFFFFFF"
+                  android:textSize="14sp"
+                  android:lineSpacingExtra="4dp"
+                  android:textIsSelectable="true" />
+          </ScrollView>
+          EOF
+
+          cat > app/src/main/res/layout/item_channel.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:orientation="horizontal"
+              android:padding="12dp"
+              android:focusable="true"
+              android:focusableInTouchMode="true"
+              android:background="@drawable/tile_selector"
+              android:clickable="true"
+              android:layout_marginBottom="4dp"
+              android:gravity="center_vertical">
+              <TextView
+                  android:id="@+id/txtNumber"
+                  android:layout_width="40dp"
+                  android:layout_height="wrap_content"
+                  android:gravity="center"
+                  android:textColor="@color/text_dim"
+                  android:textSize="16sp"
+                  android:textStyle="bold" />
+              <ImageView
+                  android:id="@+id/logo"
+                  android:layout_width="80dp"
+                  android:layout_height="80dp"
+                  android:scaleType="centerCrop"
+                  android:background="#222222" />
+              <TextView
+                  android:id="@+id/name"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:layout_weight="1"
+                  android:paddingStart="16dp"
+                  android:paddingEnd="8dp"
+                  android:gravity="center_vertical"
+                  android:textColor="@color/text"
+                  android:textSize="18sp"
+                  android:textStyle="bold"
+                  android:maxLines="2"
+                  android:ellipsize="end" />
+              <ImageView
+                  android:id="@+id/btnFav"
+                  android:layout_width="48dp"
+                  android:layout_height="48dp"
+                  android:padding="8dp"
+                  android:src="@android:drawable/btn_star_big_off"
+                  android:focusable="false"
+                  android:clickable="false" />
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg">
+              <LinearLayout
+                  android:id="@+id/topBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="64dp"
+                  android:orientation="horizontal"
+                  android:background="#1A1A1A"
+                  android:gravity="center_vertical"
+                  android:paddingHorizontal="16dp"
+                  app:layout_constraintTop_toTopOf="parent">
+                  <TextView
+                      android:id="@+id/txtTitle"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Все каналы"
+                      android:textColor="@color/text"
+                      android:textSize="22sp"
+                      android:textStyle="bold" />
+                  <TextView
+                      android:id="@+id/btnFavFilter"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="★ Избранное"
+                      android:textColor="#FFEB3B"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:padding="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:id="@+id/btnRefresh"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Обновить"
+                      android:textColor="@color/text_dim"
+                      android:textSize="16sp"
+                      android:padding="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:id="@+id/btnCheckUpdates"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="⬇️"
+                      android:textColor="@color/text_dim"
+                      android:textSize="22sp"
+                      android:paddingHorizontal="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:contentDescription="Проверить обновления"
+                      android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:id="@+id/btnSettings"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="⚙"
+                      android:textColor="@color/text_dim"
+                      android:textSize="22sp"
+                      android:paddingHorizontal="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:background="?attr/selectableItemBackground" />
+              </LinearLayout>
+              <androidx.recyclerview.widget.RecyclerView
+                  android:id="@+id/recycler"
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:padding="8dp"
+                  android:clipToPadding="false"
+                  app:layout_constraintTop_toBottomOf="@id/topBar"
+                  app:layout_constraintBottom_toBottomOf="parent"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+              <ProgressBar
+                  android:id="@+id/progress"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  app:layout_constraintTop_toTopOf="@id/recycler"
+                  app:layout_constraintBottom_toBottomOf="@id/recycler"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+              <TextView
+                  android:id="@+id/error"
+                  android:layout_width="0dp"
+                  android:layout_height="wrap_content"
+                  android:padding="24dp"
+                  android:gravity="center"
+                  android:textColor="#FFFF6B6B"
+                  android:textSize="14sp"
+                  android:lineSpacingExtra="3dp"
+                  android:clickable="true"
+                  android:focusable="true"
+                  android:visibility="gone"
+                  app:layout_constraintTop_toTopOf="@id/recycler"
+                  app:layout_constraintBottom_toBottomOf="@id/recycler"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent" />
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          EOF
+
+          cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <androidx.constraintlayout.widget.ConstraintLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@color/bg">
+              <LinearLayout
+                  android:id="@+id/topBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="64dp"
+                  android:orientation="horizontal"
+                  android:background="#1A1A1A"
+                  android:gravity="center_vertical"
+                  android:paddingHorizontal="16dp"
+                  app:layout_constraintTop_toTopOf="parent">
+                  <TextView
+                      android:id="@+id/btnBack"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="← Назад"
+                      android:textColor="@color/text"
+                      android:textSize="18sp"
+                      android:textStyle="bold"
+                      android:padding="12dp"
+                      android:focusable="true"
+                      android:clickable="true"
+                      android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Настройки"
+                      android:textColor="@color/text"
+                      android:textSize="22sp"
+                      android:textStyle="bold"
+                      android:paddingStart="16dp" />
+              </LinearLayout>
+              <ScrollView
+                  android:layout_width="0dp"
+                  android:layout_height="0dp"
+                  android:fillViewport="true"
+                  app:layout_constraintTop_toBottomOf="@id/topBar"
+                  app:layout_constraintBottom_toBottomOf="parent"
+                  app:layout_constraintStart_toStartOf="parent"
+                  app:layout_constraintEnd_toEndOf="parent">
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="vertical"
+                      android:padding="16dp">
+
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
+                          android:padding="20dp"
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="ОБНОВЛЕНИЯ"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/txtVersion"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="TV Player"
+                              android:textColor="@color/text"
+                              android:textSize="20sp"
+                              android:textStyle="bold" />
+                          <TextView
+                              android:id="@+id/txtStatus"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="Проверка обновлений..."
+                              android:textColor="#FF8A8D93"
+                              android:textSize="14sp"
+                              android:paddingTop="6dp"
+                              android:paddingBottom="16dp" />
+                          <TextView
+                              android:id="@+id/btnCheckUpdate"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🔄 Проверить обновления"
+                              android:textColor="#FFFFFFFF"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:gravity="center"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/button_accent_bg" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
+                          android:padding="20dp"
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="ПАМЯТЬ"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/txtCacheStats"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="Подсчёт..."
+                              android:textColor="@color/text_dim"
+                              android:textSize="13sp"
+                              android:lineSpacingExtra="2dp"
+                              android:fontFamily="monospace"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/btnClearCache"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="🗑 Очистить кэш"
+                              android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector"
+                              android:layout_marginBottom="8dp" />
+                          <TextView
+                              android:id="@+id/btnFullReset"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="⚠️ Полный сброс (всё)"
+                              android:textColor="#FFFF6B6B"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector"
+                              android:layout_marginBottom="8dp" />
+                          <TextView
+                              android:id="@+id/btnOpenLog"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="📋 Открыть лог"
+                              android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector"
+                              android:layout_marginBottom="8dp" />
+                          <TextView
+                              android:id="@+id/btnShareLog"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="📤 Отправить лог"
+                              android:textColor="@color/text"
+                              android:textSize="16sp"
+                              android:textStyle="bold"
+                              android:padding="16dp"
+                              android:focusable="true"
+                              android:clickable="true"
+                              android:background="@drawable/tile_selector" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:background="@drawable/card_bg"
+                          android:padding="20dp"
+                          android:layout_marginBottom="16dp">
+                          <TextView
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:text="О ПРОГРАММЕ"
+                              android:textColor="#FF8A8D93"
+                              android:textSize="12sp"
+                              android:textStyle="bold"
+                              android:letterSpacing="0.1"
+                              android:paddingBottom="12dp" />
+                          <TextView
+                              android:id="@+id/txtAbout"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:textColor="@color/text"
+                              android:textSize="14sp"
+                              android:lineSpacingExtra="4dp" />
+                      </LinearLayout>
+
+                      <TextView
+                          android:id="@+id/btnExitApp"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="✕ Выход из приложения"
+                          android:textColor="#FFFF6B6B"
+                          android:textSize="16sp"
+                          android:textStyle="bold"
+                          android:gravity="center"
+                          android:padding="20dp"
+                          android:focusable="true"
+                          android:clickable="true"
+                          android:background="@drawable/card_bg" />
+                  </LinearLayout>
+              </ScrollView>
+          </androidx.constraintlayout.widget.ConstraintLayout>
+          EOF
+
+          cat > app/src/main/res/layout/activity_player.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="#000000">
+
+              <androidx.media3.ui.PlayerView
+                  android:id="@+id/playerView"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  app:use_controller="false"
+                  app:resize_mode="zoom"
+                  android:keepScreenOn="true"
+                  android:focusable="false" />
+
+              <View
+                  android:id="@+id/touchArea"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:focusable="false"
+                  android:focusableInTouchMode="false" />
+
+              <LinearLayout
+                  android:id="@+id/channelListPanel"
+                  android:layout_width="320dp"
+                  android:layout_height="match_parent"
+                  android:layout_gravity="start"
+                  android:background="#EE111111"
+                  android:visibility="gone"
+                  android:orientation="vertical"
+                  android:elevation="8dp">
+                  <TextView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Выбор канала"
+                      android:textColor="#FFFFFF"
+                      android:textSize="20sp"
+                      android:textStyle="bold"
+                      android:padding="16dp" />
+                  <androidx.recyclerview.widget.RecyclerView
+                      android:id="@+id/channelListRecycler"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent" />
+              </LinearLayout>
+
+              <TextView
+                  android:id="@+id/channelNameOverlay"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="bottom|start"
+                  android:layout_margin="32dp"
+                  android:background="#AA000000"
+                  android:paddingHorizontal="24dp"
+                  android:paddingVertical="16dp"
+                  android:textColor="#FFFFFF"
+                  android:textSize="24sp"
+                  android:textStyle="bold"
+                  android:visibility="gone" />
+
+              <LinearLayout
+                  android:id="@+id/controlsOverlay"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:background="#55000000"
+                  android:gravity="center"
+                  android:orientation="vertical"
+                  android:visibility="gone">
+                  <ImageView
+                      android:id="@+id/btnPlayPause"
+                      android:layout_width="96dp"
+                      android:layout_height="96dp"
+                      android:src="@android:drawable/ic_media_pause"
+                      android:background="@drawable/btn_play_pause_focus"
+                      android:padding="20dp"
+                      app:tint="#FFFFFF"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
+
+              <LinearLayout
+                  android:id="@+id/leftControls"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|start"
+                  android:layout_margin="24dp"
+                  android:orientation="horizontal"
+                  android:visibility="gone">
+                  <TextView
+                      android:id="@+id/btnBack"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:background="@drawable/button_focus_bg"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="← В список"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+                  <TextView
+                      android:id="@+id/btnExitApp"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginStart="8dp"
+                      android:background="@drawable/button_focus_bg"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="✕ Выход"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
+
+              <TextView
+                  android:id="@+id/btnSleepTimer"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|center_horizontal"
+                  android:layout_margin="24dp"
+                  android:background="@drawable/button_focus_bg"
+                  android:paddingHorizontal="16dp"
+                  android:paddingVertical="8dp"
+                  android:text="Сон: Выкл"
+                  android:textColor="#FFFFFF"
+                  android:textSize="16sp"
+                  android:textStyle="bold"
+                  android:clickable="true"
+                  android:focusable="true"
+                  android:visibility="gone" />
+
+              <LinearLayout
+                  android:id="@+id/rightControls"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="top|end"
+                  android:layout_margin="24dp"
+                  android:orientation="vertical"
+                  android:visibility="gone">
+                  <TextView
+                      android:id="@+id/btnQuality"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:background="@drawable/button_focus_bg"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="Auto"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+                  <TextView
+                      android:id="@+id/btnAspect"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="8dp"
+                      android:background="@drawable/button_focus_bg"
+                      android:paddingHorizontal="16dp"
+                      android:paddingVertical="8dp"
+                      android:text="Заполнить"
+                      android:textColor="#FFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
+
+              <ProgressBar
+                  android:id="@+id/progress"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="center" />
+
+              <LinearLayout
+                  android:id="@+id/errorLayout"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="center"
+                  android:orientation="vertical"
+                  android:gravity="center"
+                  android:visibility="gone"
+                  android:background="#DD000000"
+                  android:padding="24dp">
+
+                  <TextView
+                      android:id="@+id/errorText"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:textColor="#FFAAAAAA"
+                      android:textSize="14sp"
+                      android:lineSpacingExtra="3dp"
+                      android:gravity="center" />
+
+                  <TextView
+                      android:id="@+id/btnShowLog"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="12dp"
+                      android:background="#333333"
+                      android:paddingHorizontal="20dp"
+                      android:paddingVertical="10dp"
+                      android:text="📋 Подробнее"
+                      android:textColor="#FFFFFF"
+                      android:textSize="14sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+
+                  <TextView
+                      android:id="@+id/btnRetry"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="12dp"
+                      android:background="#333333"
+                      android:paddingHorizontal="24dp"
+                      android:paddingVertical="12dp"
+                      android:text="Повторить"
+                      android:textColor="#FFFFFF"
+                      android:textSize="18sp"
+                      android:textStyle="bold"
+                      android:clickable="true"
+                      android:focusable="true" />
+              </LinearLayout>
+          </FrameLayout>
+          EOF
+
+          cat > app/src/main/res/layout/item_panel_channel.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <TextView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/panelChannelName"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:padding="16dp"
+              android:textColor="#FFFFFF"
+              android:textSize="18sp"
+              android:focusable="true"
+              android:focusableInTouchMode="true"
+              android:clickable="true"
+              android:background="?attr/selectableItemBackground" />
+          EOF
+
+      - name: "🐍 Python (полное DoH: urllib + dnspython wire, без httpx)"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/python/resolver.py << 'EOF'
+          import socket
+          import time
+          import urllib.request
+
+          # ==================== DoH (DNS over HTTPS) для всего Python ====================
+          # Патчим socket.getaddrinfo. HTTP-транспорт — stdlib urllib (не httpx!),
+          # dnspython используется ТОЛЬКО для wire-формата (make_query / from_wire).
+          # DoH-хосты исключены из патча (иначе рекурсия).
+          DOH_URL = "https://dns.adguard-dns.com/dns-query"
+          DOH_HOSTS = {"dns.adguard-dns.com", "dns.google", "cloudflare-dns.com", "dns.quad9.net"}
+          DOH_TIMEOUT = 2
+          DNS_CACHE = {}
+          DNS_TTL = 300
+          _doh_fail_until = 0.0
+          _doh_consecutive_fails = 0
+          _DOH_MAX_FAILS = 3
+          _DOH_COOLDOWN = 60
+
+          try:
+              import dns.message
+              import dns.rdatatype
+              _DNS_AVAILABLE = True
+          except Exception:
+              _DNS_AVAILABLE = False
+
+          _orig_getaddrinfo = socket.getaddrinfo
+
+          def _doh_lookup(host, timeout=DOH_TIMEOUT):
+              """Возвращает список IPv4-строк или пустой список (если NXDOMAIN/blocked)."""
+              q = dns.message.make_query(host, dns.rdatatype.A)
+              req = urllib.request.Request(
+                  DOH_URL,
+                  data=q.to_wire(),
+                  headers={
+                      "Content-Type": "application/dns-message",
+                      "Accept": "application/dns-message",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  wire = resp.read()
+              msg = dns.message.from_wire(wire)
+              ips = []
+              if msg.answer:
+                  for rrset in msg.answer:
+                      for rr in rrset:
+                          ips.append(str(rr))
+              return ips
+
+          def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+              global _doh_fail_until, _doh_consecutive_fails
+              if not _DNS_AVAILABLE or host in DOH_HOSTS:
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              if family not in (0, socket.AF_INET):
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              if time.time() < _doh_fail_until:
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              now = time.time()
+              cached = DNS_CACHE.get(host)
+              if cached and (now - cached[1]) < DNS_TTL:
+                  ips = cached[0]
+              else:
+                  try:
+                      ips = _doh_lookup(host)
+                      if not ips:
+                          _doh_consecutive_fails = 0
+                          return _orig_getaddrinfo(host, port, family, type, proto, flags)
+                      DNS_CACHE[host] = (ips, now)
+                      _doh_consecutive_fails = 0
+                  except Exception:
+                      _doh_consecutive_fails += 1
+                      if _doh_consecutive_fails >= _DOH_MAX_FAILS:
+                          _doh_fail_until = time.time() + _DOH_COOLDOWN
+                      return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              result = []
+              for ip in ips:
+                  try:
+                      result.append((socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port)))
+                  except Exception:
+                      pass
+              if not result:
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              return result
+
+          socket.getaddrinfo = _doh_getaddrinfo
+
+          def doh_health():
+              """Возвращает dict со статусом DoH — используется Kotlin для лога."""
+              return {
+                  "available": _DNS_AVAILABLE,
+                  "consecutive_fails": _doh_consecutive_fails,
+                  "cooldown_active": time.time() < _doh_fail_until,
+                  "cooldown_remaining": max(0, int(_doh_fail_until - time.time())),
+                  "cache_size": len(DNS_CACHE),
+              }
+          # ==================== /DoH ====================
+
+          import yt_dlp
+          import re
+          socket.setdefaulttimeout(15)
+          HEADERS = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Referer": "https://vk.com/",
+              "Origin":  "https://vk.com",
+          }
+          def resolve(url):
+              try:
+                  opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                          "http_headers": HEADERS, "socket_timeout": 15}
+                  with yt_dlp.YoutubeDL(opts) as ydl:
+                      info = ydl.extract_info(url, download=False)
+                  if info.get("url") and ".m3u8" in info["url"]:
+                      return info["url"]
+                  formats = info.get("formats", [])
+                  for f in formats:
+                      if f.get("protocol") == "m3u8":
+                          u = f.get("url", "")
+                          if "master" in u or "index.m3u8" in u:
+                              return u
+                  best = None; max_h = -1
+                  for f in formats:
+                      if f.get("protocol") == "m3u8":
+                          h = f.get("height") or 0
+                          if h > max_h: max_h = h; best = f
+                  if best: return best["url"]
+                  return info.get("url") or "ERROR: no m3u8 found"
+              except Exception as e:
+                  return "ERROR[" + type(e).__name__ + "]: " + str(e)
+          def get_thumbnail(url):
+              try:
+                  req = urllib.request.Request(url, headers=HEADERS)
+                  with urllib.request.urlopen(req, timeout=15) as response:
+                      html = response.read().decode('utf-8', errors='ignore')
+                      match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
+                      if match:
+                          return match.group(1)
+              except Exception:
+                  pass
+              try:
+                  with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True,
+                                         "http_headers": HEADERS, "socket_timeout": 15}) as ydl:
+                      info = ydl.extract_info(url, download=False)
+                      return info.get("thumbnail", "")
+              except Exception:
+                  return ""
+          EOF
+
+      - name: "📝 CrashLogger + TVPlayerApp + UpdateDialog"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/CrashLogger.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Build
+          import androidx.core.content.FileProvider
+          import java.io.File
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          object CrashLogger {
+              private const val LOG_FILE = "app.log"
+              private const val MAX_SIZE = 500 * 1024
+              private var appContext: Context? = null
+              private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+
+              @Synchronized
+              fun init(context: Context) {
+                  if (appContext != null) return
+                  appContext = context.applicationContext
+                  val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+                  Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                      log("CRASH", "Uncaught exception in thread ${thread.name}: ${throwable.javaClass.simpleName}")
+                      log("CRASH", throwable.stackTraceToString())
+                      defaultHandler?.uncaughtException(thread, throwable)
+                  }
+                  val appVersion = try { BuildConfig.VERSION_CODE.toString() } catch (_: Exception) { "?" }
+                  val device = "${Build.MANUFACTURER} ${Build.MODEL}"
+                  val android = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+                  val channel = try { BuildConfig.GITHUB_REPO } catch (_: Exception) { "?" }
+                  log("INIT", "═══ App started ═══")
+                  log("INIT", "Version: v$appVersion")
+                  log("INIT", "Device: $device")
+                  log("INIT", "Android: $android")
+                  log("INIT", "yt-dlp updated at build time")
+                  log("INIT", "Repo: $channel")
+              }
+
+              @Synchronized
+              fun log(tag: String, message: String) {
+                  val ctx = appContext ?: return
+                  try {
+                      val file = File(ctx.filesDir, LOG_FILE)
+                      if (file.exists() && file.length() > MAX_SIZE) {
+                          val content = file.readText()
+                          val cut = content.length / 2
+                          val firstNewline = content.indexOf('\n', cut)
+                          val trimmed = if (firstNewline > 0) content.substring(firstNewline + 1) else content
+                          file.writeText(trimmed)
+                      }
+                      val timestamp = dateFormat.format(Date())
+                      file.appendText("[$timestamp] [$tag] $message\n")
+                  } catch (_: Exception) {}
+              }
+
+              fun info(tag: String, message: String) = log(tag, message)
+              fun error(tag: String, message: String, throwable: Throwable? = null) {
+                  log(tag, "❌ $message")
+                  throwable?.let { log(tag, it.stackTraceToString()) }
+              }
+              fun readAll(context: Context): String {
+                  return try {
+                      val file = File(context.filesDir, LOG_FILE)
+                      if (file.exists()) file.readText() else "Лог пуст"
+                  } catch (e: Exception) { "Не удалось прочитать лог: ${e.message}" }
+              }
+              fun clear(context: Context) {
+                  try { File(context.filesDir, LOG_FILE).delete() } catch (_: Exception) {}
+              }
+              fun share(context: Context) {
+                  try {
+                      val file = File(context.filesDir, LOG_FILE)
+                      if (!file.exists()) return
+                      val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                      val intent = Intent(Intent.ACTION_SEND).apply {
+                          type = "text/plain"
+                          putExtra(Intent.EXTRA_STREAM, uri)
+                          putExtra(Intent.EXTRA_SUBJECT, "TV Player — лог")
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      }
+                      context.startActivity(Intent.createChooser(intent, "Отправить лог"))
+                  } catch (e: Exception) { log("SHARE", "Не удалось отправить лог: ${e.message}") }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/TVPlayerApp.kt << 'EOF'
+          package com.tvplayer.app
+          import com.chaquo.python.Python
+          import com.chaquo.python.android.PyApplication
+
+          class TVPlayerApp : PyApplication() {
+              override fun onCreate() {
+                  super.onCreate()
+                  CrashLogger.init(this)
+                  Thread {
+                      try {
+                          DohProvider.testDoh(this)
+                      } catch (e: Exception) {
+                          CrashLogger.error("DoH", "Ошибка pre-flight проверки DoH", e)
+                      }
+                      // Python-DoH health через resolver.py
+                      try {
+                          val m = Python.getInstance().getModule("resolver")
+                          val health = m.callAttr("doh_health").toString()
+                          CrashLogger.info("DoH", "Python DoH health: $health")
+                      } catch (e: Exception) {
+                          CrashLogger.error("DoH", "Не удалось получить Python DoH health", e)
+                      }
+                  }.apply { name = "DohPreflight"; isDaemon = true }.start()
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/UpdateDialog.kt << 'EOF'
+          package com.tvplayer.app
+          import android.app.AlertDialog
+          import android.content.Context
+          import android.view.LayoutInflater
+          import android.widget.TextView
+
+          object UpdateDialog {
+              fun show(
+                  context: Context,
+                  versionCode: Int,
+                  changelog: String,
+                  onInstall: () -> Unit
+              ) {
+                  val view = LayoutInflater.from(context).inflate(R.layout.dialog_update, null)
+                  val text = view.findViewById<TextView>(R.id.dialogUpdateText)
+                  text.text = if (changelog.isBlank()) "Новая версия приложения" else changelog
+
+                  AlertDialog.Builder(context)
+                      .setTitle("Доступно обновление v$versionCode")
+                      .setView(view)
+                      .setPositiveButton("Скачать и установить") { _, _ -> onInstall() }
+                      .setNegativeButton("Позже", null)
+                      .show()
+              }
+          }
+          EOF
+
+      - name: "🌐 DoH Provider (синглтон, без lock-конфликтов)"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/DohProvider.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import okhttp3.Cache
+          import okhttp3.Dns
+          import okhttp3.HttpUrl.Companion.toHttpUrl
+          import okhttp3.OkHttpClient
+          import okhttp3.dnsoverhttps.DnsOverHttps
+          import java.io.File
+          import java.net.InetAddress
+          import java.net.UnknownHostException
+
+          object DohProvider {
+              private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
+              private const val TEST_DOMAIN = "example.com"
+
+              @Volatile private var cached: Dns? = null
+
+              fun createWithFallback(context: Context): Dns {
+                  cached?.let { return it }
+                  synchronized(this) {
+                      cached?.let { return it }
+                      val created = build(context.applicationContext)
+                      cached = created
+                      return created
+                  }
+              }
+
+              private fun build(context: Context): Dns {
+                  val httpClient = OkHttpClient.Builder().build()
+                  val doh = try {
+                      val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
+                      val bootstrapClient = httpClient.newBuilder().cache(cache).build()
+                      DnsOverHttps.Builder()
+                          .client(bootstrapClient)
+                          .url(DOH_URL.toHttpUrl())
+                          .includeIPv6(false)
+                          .build()
+                  } catch (e: Exception) {
+                      CrashLogger.error("DoH", "Не удалось создать DoH — используем системный DNS", e)
+                      null
+                  }
+
+                  return object : Dns {
+                      override fun lookup(hostname: String): List<InetAddress> {
+                          if (doh != null) {
+                              try {
+                                  val result = doh.lookup(hostname)
+                                  if (result.isNotEmpty()) return result
+                                  CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
+                              } catch (e: Exception) {
+                                  CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк на системный DNS")
+                              }
+                          }
+                          return try {
+                              Dns.SYSTEM.lookup(hostname)
+                          } catch (e: UnknownHostException) {
+                              CrashLogger.error("DoH", "Системный DNS тоже не смог резолвить $hostname", e)
+                              throw e
+                          }
+                      }
+                  }
+              }
+
+              fun testDoh(context: Context): Boolean {
+                  return try {
+                      val client = OkHttpClient.Builder().build()
+                      val doh = DnsOverHttps.Builder()
+                          .client(client)
+                          .url(DOH_URL.toHttpUrl())
+                          .includeIPv6(false)
+                          .build()
+                      val started = System.currentTimeMillis()
+                      val result = doh.lookup(TEST_DOMAIN)
+                      val elapsed = System.currentTimeMillis() - started
+                      if (result.isNotEmpty()) {
+                          CrashLogger.info("DoH", "✅ DoH AdGuard работает ($TEST_DOMAIN → ${result.first().hostAddress}, ${elapsed}мс)")
+                          true
+                      } else {
+                          CrashLogger.info("DoH", "⚠️ DoH AdGuard вернул пустой ответ для $TEST_DOMAIN (${elapsed}мс)")
+                          false
+                      }
+                  } catch (e: Exception) {
+                      CrashLogger.error("DoH", "❌ DoH AdGuard не работает: ${e.javaClass.simpleName}: ${e.message}", e)
+                      false
+                  }
+              }
+          }
+          EOF
+
+      - name: "🧠 Kotlin Core (DoH в OkHttpClient)"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
+          package com.tvplayer.app
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONObject
+          import java.util.UUID
+          import java.util.concurrent.TimeUnit
+
+          data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
+
+          private fun buildClient(context: android.content.Context): OkHttpClient {
+              return OkHttpClient.Builder()
+                  .connectTimeout(10, TimeUnit.SECONDS)
+                  .readTimeout(20, TimeUnit.SECONDS)
+                  .dns(DohProvider.createWithFallback(context))
+                  .build()
+          }
+
+          private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+          suspend fun loadChannels(context: android.content.Context, categoryId: String, manual: List<Channel>): List<Channel> =
+              withContext(Dispatchers.IO) {
+                  val result = mutableListOf<Channel>()
+                  val startTime = System.currentTimeMillis()
+                  CrashLogger.info("VkApi", "→ Загрузка каналов, category=$categoryId")
+                  try {
+                      val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
+                      val req = Request.Builder().url(url)
+                          .header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
+                          .header("Origin", "https://live.vkvideo.ru").header("Referer", "https://live.vkvideo.ru/")
+                          .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
+                      buildClient(context).newCall(req).execute().use { resp ->
+                          val body = resp.body?.string().orEmpty()
+                          CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер: ${body.length} байт")
+                          if (resp.isSuccessful && body.isNotBlank()) {
+                              val streams = JSONObject(body).optJSONObject("data")?.optJSONArray("streamBlogs")
+                              if (streams != null) for (i in 0 until streams.length()) {
+                                  val item = streams.optJSONObject(i) ?: continue
+                                  if (!item.optBoolean("is_online", true)) continue
+                                  val blog = item.optJSONObject("blog") ?: continue
+                                  val blogUrl = blog.optString("blogUrl"); if (blogUrl.isBlank()) continue
+                                  val raw = blog.optString("title").ifBlank { blog.optJSONObject("owner")?.optString("displayName").orEmpty() }.ifBlank { blogUrl }
+                                  val name = if (raw.length > 60) raw.take(60) + "…" else raw
+                                  val logo = blog.optJSONObject("owner")?.optString("avatarUrl")?.ifBlank { null } ?: blog.optString("coverUrl")
+                                  result.add(Channel(name, "https://live.vkvideo.ru/$blogUrl", logo))
+                              }
+                          } else {
+                              CrashLogger.error("VkApi", "Неуспешный ответ HTTP ${resp.code}")
+                          }
+                      }
+                  } catch (e: Exception) {
+                      CrashLogger.error("VkApi", "Ошибка загрузки каналов", e)
+                  }
+                  val elapsed = System.currentTimeMillis() - startTime
+                  CrashLogger.info("VkApi", "✓ Загружено ${result.size} каналов за ${elapsed}мс (+ ${manual.size} ручных)")
+                  result + manual
+              }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/ChannelCache.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.File
+
+          object ChannelCache {
+              private const val FILE_NAME = "channels_cache.json"
+              private const val FRESH_TTL_MS = 6 * 60 * 60 * 1000L
+              private const val EXPIRE_TTL_MS = 24 * 60 * 60 * 1000L
+
+              fun save(context: Context, channels: List<Channel>) {
+                  try {
+                      val arr = JSONArray()
+                      channels.forEach { ch ->
+                          val obj = JSONObject()
+                          obj.put("name", ch.name)
+                          obj.put("url", ch.url)
+                          obj.put("logo", ch.logo)
+                          obj.put("group", ch.group)
+                          arr.put(obj)
+                      }
+                      val root = JSONObject()
+                      root.put("timestamp", System.currentTimeMillis())
+                      root.put("channels", arr)
+                      File(context.filesDir, FILE_NAME).writeText(root.toString())
+                      CrashLogger.info("ChannelCache", "Сохранено ${channels.size} каналов")
+                  } catch (e: Exception) {
+                      CrashLogger.error("ChannelCache", "Ошибка сохранения", e)
+                  }
+              }
+
+              fun load(context: Context): List<Channel>? {
+                  try {
+                      val file = File(context.filesDir, FILE_NAME)
+                      if (!file.exists()) return null
+                      val root = JSONObject(file.readText())
+                      val ts = root.optLong("timestamp", 0L)
+                      if (System.currentTimeMillis() - ts > EXPIRE_TTL_MS) {
+                          CrashLogger.info("ChannelCache", "Кэш устарел (>24ч)")
+                          return null
+                      }
+                      val arr = root.optJSONArray("channels") ?: return null
+                      val result = mutableListOf<Channel>()
+                      for (i in 0 until arr.length()) {
+                          val obj = arr.optJSONObject(i) ?: continue
+                          result.add(Channel(obj.optString("name"), obj.optString("url"), obj.optString("logo"), obj.optString("group", "VK Live")))
+                      }
+                      CrashLogger.info("ChannelCache", "Загружено ${result.size} каналов из кэша")
+                      return result
+                  } catch (e: Exception) {
+                      CrashLogger.error("ChannelCache", "Ошибка чтения", e)
+                      return null
+                  }
+              }
+
+              fun isFresh(context: Context): Boolean {
+                  try {
+                      val file = File(context.filesDir, FILE_NAME)
+                      if (!file.exists()) return false
+                      val root = JSONObject(file.readText())
+                      val ts = root.optLong("timestamp", 0L)
+                      return System.currentTimeMillis() - ts < FRESH_TTL_MS
+                  } catch (_: Exception) { return false }
+              }
+
+              fun clear(context: Context) {
+                  try { File(context.filesDir, FILE_NAME).delete() } catch (_: Exception) {}
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/NetworkUtils.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import android.net.ConnectivityManager
+          import android.net.NetworkCapabilities
+          object NetworkUtils {
+              fun isOnline(context: Context): Boolean {
+                  val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                  val network = cm.activeNetwork ?: return false
+                  val capabilities = cm.getNetworkCapabilities(network) ?: return false
+                  return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/StreamResolver.kt << 'EOF'
+          package com.tvplayer.app
+          import com.chaquo.python.Python
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          object StreamResolver {
+              suspend fun resolve(url: String): String = withContext(Dispatchers.IO) {
+                  val start = System.currentTimeMillis()
+                  CrashLogger.info("StreamResolver", "→ Резолв: $url")
+                  try {
+                      val m = Python.getInstance().getModule("resolver")
+                      val result = m.callAttr("resolve", url).toString()
+                      val elapsed = System.currentTimeMillis() - start
+                      if (result.startsWith("ERROR")) {
+                          CrashLogger.error("StreamResolver", "✗ Резолв провален за ${elapsed}мс: $result")
+                      } else {
+                          CrashLogger.info("StreamResolver", "✓ Резолв за ${elapsed}мс → ${result.take(80)}...")
+                      }
+                      result
+                  } catch (e: Exception) {
+                      val elapsed = System.currentTimeMillis() - start
+                      CrashLogger.error("StreamResolver", "✗ Исключение при резолве за ${elapsed}мс", e)
+                      "ERROR[${e.javaClass.simpleName}]: ${e.message ?: "unknown"}"
+                  }
+              }
+              suspend fun getThumbnail(url: String): String = withContext(Dispatchers.IO) {
+                  try {
+                      val m = Python.getInstance().getModule("resolver")
+                      m.callAttr("get_thumbnail", url).toString()
+                  } catch (_: Exception) { "" }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/StreamCache.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+
+          object StreamCache {
+              private const val PREFS = "stream_cache"
+              private const val TTL_MS = 2 * 60 * 60 * 1000L
+              private const val MAX_ENTRIES = 200
+
+              fun get(context: Context, channelUrl: String): String? {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val entry = prefs.getString(channelUrl, null) ?: return null
+                  val parts = entry.split("|")
+                  if (parts.size != 2) return null
+                  val url = parts[0]
+                  val ts = parts[1].toLongOrNull() ?: return null
+                  if (System.currentTimeMillis() - ts > TTL_MS) {
+                      prefs.edit().remove(channelUrl).apply()
+                      return null
+                  }
+                  return url
+              }
+
+              fun put(context: Context, channelUrl: String, m3u8: String) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val all = prefs.all
+                  if (all.size >= MAX_ENTRIES) {
+                      val entries = all.entries
+                          .filter { it.value is String }
+                          .map { e ->
+                              val parts = (e.value as String).split("|")
+                              val ts = if (parts.size == 2) parts[1].toLongOrNull() ?: 0L else 0L
+                              e.key to ts
+                          }
+                          .sortedBy { it.second }
+                          .take(maxOf(1, all.size - MAX_ENTRIES + 1))
+                      val editor = prefs.edit()
+                      entries.forEach { editor.remove(it.first) }
+                      editor.apply()
+                      if (entries.isNotEmpty()) {
+                          CrashLogger.info("StreamCache", "Эвикция ${entries.size} старых (лимит $MAX_ENTRIES)")
+                      }
+                  }
+                  prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
+              }
+
+              fun invalidate(context: Context, channelUrl: String) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  prefs.edit().remove(channelUrl).apply()
+              }
+
+              fun clearAll(context: Context) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  prefs.edit().clear().apply()
+              }
+
+              fun cleanup(context: Context) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val all = prefs.all
+                  if (all.isEmpty()) return
+                  val editor = prefs.edit()
+                  var removed = 0
+                  val now = System.currentTimeMillis()
+                  for ((key, value) in all) {
+                      if (value is String) {
+                          val parts = value.split("|")
+                          if (parts.size != 2) {
+                              editor.remove(key); removed++
+                          } else {
+                              val ts = parts[1].toLongOrNull() ?: 0L
+                              if (now - ts > TTL_MS) {
+                                  editor.remove(key); removed++
+                              }
+                          }
+                      } else {
+                          editor.remove(key); removed++
+                      }
+                  }
+                  editor.apply()
+                  if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных")
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/ChannelAdapter.kt << 'EOF'
+          package com.tvplayer.app
+          import android.view.*
+          import android.widget.ImageView
+          import android.widget.TextView
+          import androidx.recyclerview.widget.RecyclerView
+          import coil.load
+          class ChannelAdapter(
+              private val items: List<Channel>,
+              private val onClick: (Channel) -> Unit,
+              private val onLongClick: (Channel) -> Unit
+          ) : RecyclerView.Adapter<ChannelAdapter.VH>() {
+              class VH(v: View) : RecyclerView.ViewHolder(v) {
+                  val txtNumber: TextView = v.findViewById(R.id.txtNumber)
+                  val logo: ImageView = v.findViewById(R.id.logo)
+                  val name: TextView = v.findViewById(R.id.name)
+                  val btnFav: ImageView = v.findViewById(R.id.btnFav)
+              }
+              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH = VH(LayoutInflater.from(p.context).inflate(R.layout.item_channel, p, false))
+              override fun onBindViewHolder(h: VH, pos: Int) {
+                  val ch = items[pos]
+                  h.txtNumber.text = (pos + 1).toString()
+                  h.name.text = ch.name
+                  if (ch.logo.isNotBlank()) {
+                      h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+                  } else {
+                      h.logo.load(null); h.logo.setImageDrawable(null)
+                  }
+                  if (ch.isFavorite) { h.btnFav.setImageResource(android.R.drawable.btn_star_big_on); h.btnFav.setColorFilter(android.graphics.Color.YELLOW) } else { h.btnFav.setImageResource(android.R.drawable.btn_star_big_off); h.btnFav.setColorFilter(android.graphics.Color.GRAY) }
+                  if (pos == 0) h.itemView.nextFocusUpId = R.id.btnFavFilter
+                  h.itemView.setOnClickListener { onClick(ch) }
+                  h.itemView.setOnLongClickListener { onLongClick(ch); true }
+              }
+              override fun getItemCount() = items.size
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/ChannelListAdapter.kt << 'EOF'
+          package com.tvplayer.app
+          import android.view.*
+          import android.widget.TextView
+          import androidx.recyclerview.widget.RecyclerView
+          class ChannelListAdapter(private val items: List<Channel>, private val onClick: (Channel) -> Unit) : RecyclerView.Adapter<ChannelListAdapter.VH>() {
+              class VH(v: View) : RecyclerView.ViewHolder(v) { val name: TextView = v.findViewById(R.id.panelChannelName) }
+              override fun onCreateViewHolder(p: ViewGroup, t: Int): VH = VH(LayoutInflater.from(p.context).inflate(R.layout.item_panel_channel, p, false))
+              override fun onBindViewHolder(h: VH, pos: Int) {
+                  val ch = items[pos]
+                  h.name.text = "${pos + 1}. ${ch.name}"
+                  h.itemView.setOnClickListener { onClick(ch) }
+              }
+              override fun getItemCount() = items.size
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/UpdateChecker.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.concurrent.TimeUnit
+
+          object UpdateChecker {
+              data class UpdateInfo(val downloadUrl: String, val versionCode: Int, val changelog: String)
+
+              suspend fun checkForUpdate(context: Context): UpdateInfo? = withContext(Dispatchers.IO) {
+                  try {
+                      val repo = BuildConfig.GITHUB_REPO
+                      if (repo.isBlank() || repo.contains("user/")) return@withContext null
+                      CrashLogger.info("OTA", "→ Проверка (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
+                      val url = "https://api.github.com/repos/$repo/releases/latest"
+                      val client = OkHttpClient.Builder()
+                          .connectTimeout(10, TimeUnit.SECONDS)
+                          .readTimeout(15, TimeUnit.SECONDS)
+                          .dns(DohProvider.createWithFallback(context))
+                          .build()
+                      val req = Request.Builder().url(url)
+                          .header("Accept", "application/vnd.github+json")
+                          .header("User-Agent", "TVPlayer").build()
+                      client.newCall(req).execute().use { resp ->
+                          if (!resp.isSuccessful) {
+                              CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}")
+                              return@withContext null
+                          }
+                          val body = resp.body?.string() ?: return@withContext null
+                          val json = JSONObject(body)
+                          val tag = json.optString("tag_name").removePrefix("v")
+                          val newVersion = tag.toIntOrNull() ?: 0
+                          if (newVersion <= BuildConfig.VERSION_CODE) {
+                              CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})")
+                              return@withContext null
+                          }
+                          val assets = json.optJSONArray("assets") ?: return@withContext null
+                          if (assets.length() == 0) return@withContext null
+                          val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
+                          if (apkUrl.isBlank()) return@withContext null
+                          CrashLogger.info("OTA", "🎉 Доступно v$newVersion")
+                          UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия"))
+                      }
+                  } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка проверки", e)
+                      null
+                  }
+              }
+
+              suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
+                  try {
+                      CrashLogger.info("OTA", "→ Скачивание APK")
+                      val client = OkHttpClient.Builder()
+                          .connectTimeout(30, TimeUnit.SECONDS)
+                          .readTimeout(120, TimeUnit.SECONDS)
+                          .dns(DohProvider.createWithFallback(context))
+                          .build()
+                      val req = Request.Builder().url(url).build()
+                      client.newCall(req).execute().use { resp ->
+                          if (!resp.isSuccessful) {
+                              CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}")
+                              return@withContext null
+                          }
+                          val file = File(context.cacheDir, "update.apk")
+                          resp.body?.byteStream()?.use { input ->
+                              file.outputStream().use { output -> input.copyTo(output) }
+                          }
+                          CrashLogger.info("OTA", "✓ APK скачан: ${file.length() / 1024 / 1024} МБ")
+                          file
+                      }
+                  } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка скачивания", e)
+                      null
+                  }
+              }
+          }
+          EOF
+
+      - name: "🧠 MainActivity (Coil через DoH + автоочистка)"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
+          package com.tvplayer.app
+          import android.app.AlertDialog
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.StatFs
+          import android.provider.Settings
+          import android.view.View
+          import android.widget.Toast
+          import androidx.activity.OnBackPressedCallback
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.FileProvider
+          import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+          import androidx.lifecycle.lifecycleScope
+          import androidx.recyclerview.widget.LinearLayoutManager
+          import coil.ImageLoader
+          import coil.ImageLoaderFactory
+          import coil.disk.DiskCache
+          import com.tvplayer.app.databinding.ActivityMainBinding
+          import kotlinx.coroutines.launch
+          import okhttp3.OkHttpClient
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.concurrent.TimeUnit
+
+          class MainActivity : AppCompatActivity(), ImageLoaderFactory {
+              private lateinit var b: ActivityMainBinding
+              private var allChannels: List<Channel> = emptyList()
+              private var showOnlyFavorites = false
+              private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
+              private var backPressedTime: Long = 0
+              private var needScrollOnResume = false
+
+              override fun newImageLoader(): ImageLoader {
+                  val dohOkHttp = OkHttpClient.Builder()
+                      .connectTimeout(10, TimeUnit.SECONDS)
+                      .readTimeout(20, TimeUnit.SECONDS)
+                      .dns(DohProvider.createWithFallback(this))
+                      .build()
+                  return ImageLoader.Builder(this)
+                      .okHttpClient(dohOkHttp)
+                      .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
+                      .build()
+              }
+
+              override fun onCreate(s: Bundle?) {
+                  installSplashScreen()
+                  super.onCreate(s)
+                  b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
+                  b.recycler.layoutManager = LinearLayoutManager(this)
+
+                  performStartupCleanup()
+
+                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+                  b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
+                  b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+                  b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
+
+                  b.btnFavFilter.nextFocusDownId = R.id.recycler
+                  b.btnRefresh.nextFocusDownId = R.id.recycler
+                  b.btnCheckUpdates.nextFocusDownId = R.id.recycler
+                  b.btnSettings.nextFocusDownId = R.id.recycler
+                  b.error.setOnClickListener { showLogDialog() }
+
+                  onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                      override fun handleOnBackPressed() {
+                          if (System.currentTimeMillis() - backPressedTime < 3000) {
+                              CrashLogger.info("Lifecycle", "Полный выход (двойной BACK)")
+                              exitApp()
+                          } else {
+                              Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
+                              backPressedTime = System.currentTimeMillis()
+                          }
+                      }
+                  })
+
+                  loadInitial()
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  if (needScrollOnResume && allChannels.isNotEmpty()) {
+                      needScrollOnResume = false
+                      b.recycler.postDelayed({ scrollToLastChannel() }, 200)
+                  }
+              }
+
+              private fun scrollToLastChannel() {
+                  val lastIndex = prefs.getInt("last_channel", 0)
+                  if (lastIndex in allChannels.indices) {
+                      (b.recycler.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(lastIndex, 0)
+                      b.recycler.postDelayed({
+                          b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus()
+                      }, 100)
+                  }
+              }
+
+              private fun performStartupCleanup() {
+                  try {
+                      val updateApk = File(cacheDir, "update.apk")
+                      if (updateApk.exists()) {
+                          val sizeMb = updateApk.length() / 1024 / 1024
+                          updateApk.delete()
+                          CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
+                      }
+
+                      StreamCache.cleanup(this)
+
+                      val staleKeys = listOf("last_ota_check", "last_ota_version")
+                      val editor = prefs.edit()
+                      var removedKeys = 0
+                      staleKeys.forEach { k -> if (prefs.contains(k)) { editor.remove(k); removedKeys++ } }
+                      if (removedKeys > 0) {
+                          editor.apply()
+                          CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
+                      }
+
+                      val sevenDays = 7L * 24 * 60 * 60 * 1000
+                      val now = System.currentTimeMillis()
+                      var oldRemoved = 0
+                      var oldBytes = 0L
+                      cacheDir.listFiles()?.forEach { f ->
+                          if (f.isFile && (now - f.lastModified()) > sevenDays) {
+                              oldBytes += f.length()
+                              if (f.delete()) oldRemoved++
+                          } else if (f.isDirectory) {
+                              f.listFiles()?.forEach { inner ->
+                                  if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
+                                      oldBytes += inner.length()
+                                      if (inner.delete()) oldRemoved++
+                                  }
+                              }
+                          }
+                      }
+                      if (oldRemoved > 0) {
+                          CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
+                      }
+
+                      var cacheSize = 0L
+                      cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
+                      if (cacheSize > 15 * 1024 * 1024) {
+                          val mb = cacheSize / 1024 / 1024
+                          cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                          CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
+                          cacheSize = 0L
+                      }
+
+                      var filesSize = 0L
+                      filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      val filesMb = filesSize / 1024 / 1024
+                      if (filesSize > 50 * 1024 * 1024) {
+                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
+                          ChannelCache.clear(this)
+                          CrashLogger.clear(this)
+                          filesSize = 0L
+                          filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      } else if (filesSize > 30 * 1024 * 1024) {
+                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
+                      }
+
+                      val stat = StatFs(filesDir.path)
+                      val freeMb = stat.availableBytes / 1024 / 1024
+                      if (freeMb < 100) {
+                          CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
+                      }
+
+                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
+                  } catch (e: Exception) {
+                      CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
+                  }
+              }
+
+              private fun loadInitial() {
+                  val cached = ChannelCache.load(this)
+                  if (cached != null && cached.isNotEmpty()) {
+                      allChannels = cached
+                      updateView(scrollToLast = true)
+                      if (ChannelCache.isFresh(this)) {
+                          CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем")
+                          return
+                      }
+                      CrashLogger.info("MainActivity", "Кэш устарел — обновление в фоне")
+                      loadFromNetwork(forceRefresh = false)
+                  } else {
+                      CrashLogger.info("MainActivity", "Кэш пуст — полная загрузка")
+                      b.progress.visibility = View.VISIBLE
+                      loadFromNetwork(forceRefresh = false)
+                  }
+              }
+
+              private fun loadFromNetwork(forceRefresh: Boolean) {
+                  if (!NetworkUtils.isOnline(this)) {
+                      CrashLogger.info("MainActivity", "Нет интернета — отмена")
+                      if (allChannels.isEmpty()) {
+                          b.progress.visibility = View.GONE
+                          b.recycler.visibility = View.GONE
+                          b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
+                          b.error.visibility = View.VISIBLE
+                      }
+                      return
+                  }
+                  lifecycleScope.launch {
+                      try {
+                          val (manual, cat) = readConfig()
+                          val manualWithLogos = manual.map { ch ->
+                              if (ch.logo.isBlank()) {
+                                  val thumb = StreamResolver.getThumbnail(ch.url)
+                                  if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                              } else ch
+                          }
+                          val fresh = loadChannels(this@MainActivity, cat, manualWithLogos)
+                          b.progress.visibility = View.GONE
+                          if (fresh.isNotEmpty()) {
+                              val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
+                              allChannels = fresh
+                              ChannelCache.save(this@MainActivity, fresh)
+
+                              val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
+                              val actualUrls = fresh.map { it.url }.toSet()
+                              val before = currentFavs.size
+                              currentFavs.retainAll(actualUrls)
+                              if (currentFavs.size < before) {
+                                  prefs.edit().putStringSet("favorites", currentFavs).apply()
+                                  CrashLogger.info("Favorites", "Удалено ${before - currentFavs.size} мёртвых записей")
+                              }
+
+                              if (changed || forceRefresh || b.recycler.adapter == null) {
+                                  updateView(scrollToLast = forceRefresh)
+                              }
+                          } else {
+                              b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."
+                              b.error.visibility = View.VISIBLE
+                              CrashLogger.error("MainActivity", "Пустой список каналов")
+                          }
+                      } catch (e: Exception) {
+                          b.progress.visibility = View.GONE
+                          b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"
+                          b.error.visibility = View.VISIBLE
+                          CrashLogger.error("MainActivity", "Исключение при загрузке", e)
+                      }
+                  }
+              }
+
+              private fun manualCheckForUpdates() {
+                  CrashLogger.info("OTA", "Ручная проверка (кнопка ⬇️)")
+                  if (!NetworkUtils.isOnline(this)) {
+                      Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
+                      return
+                  }
+                  Toast.makeText(this, "Проверка обновлений...", Toast.LENGTH_SHORT).show()
+                  lifecycleScope.launch {
+                      val info = UpdateChecker.checkForUpdate(this@MainActivity)
+                      if (info == null) {
+                          Toast.makeText(this@MainActivity, "✅ Последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
+                      } else {
+                          UpdateDialog.show(this@MainActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
+                      }
+                  }
+              }
+
+              private fun showLogDialog() {
+                  val log = CrashLogger.readAll(this)
+                  AlertDialog.Builder(this)
+                      .setTitle("Лог приложения")
+                      .setMessage(log.takeLast(3000))
+                      .setPositiveButton("Отправить") { _, _ -> CrashLogger.share(this) }
+                      .setNegativeButton("Скопировать") { _, _ ->
+                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                          clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                          Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                      }
+                      .setNeutralButton("Закрыть", null)
+                      .show()
+              }
+
+              private fun exitApp() {
+                  finishAffinity()
+                  android.os.Process.killProcess(android.os.Process.myPid())
+              }
+
+              private fun startUpdateDownload(url: String) {
+                  Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
+                  lifecycleScope.launch {
+                      val file = UpdateChecker.downloadApk(this@MainActivity, url)
+                      if (file == null) {
+                          Toast.makeText(this@MainActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
+                          return@launch
+                      }
+                      installApk(file)
+                  }
+              }
+
+              private fun installApk(file: File) {
+                  if (!packageManager.canRequestPackageInstalls()) {
+                      Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
+                      try {
+                          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                      } catch (_: Exception) {}
+                      return
+                  }
+                  try {
+                      val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      val intent = Intent(Intent.ACTION_VIEW).apply {
+                          setDataAndType(uri, "application/vnd.android.package-archive")
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                      }
+                      startActivity(intent)
+                      CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
+                  } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка установки", e)
+                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
+                  }
+              }
+
+              private fun updateView(scrollToLast: Boolean = false) {
+                  if (allChannels.isEmpty()) return
+                  b.progress.visibility = View.GONE
+                  b.error.visibility = View.GONE
+                  val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
+                  allChannels.forEach { it.isFavorite = favs.contains(it.url) }
+                  val sorted = allChannels.sortedByDescending { it.isFavorite }
+                  val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
+                  b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
+                  b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
+                  b.recycler.visibility = View.VISIBLE
+                  b.recycler.adapter = ChannelAdapter(displayed, { ch ->
+                      needScrollOnResume = true
+                      CrashLogger.info("UI", "Открытие: ${ch.name}")
+                      val intent = Intent(this@MainActivity, PlayerActivity::class.java)
+                      intent.putExtra("index", allChannels.indexOfFirst { it.url == ch.url })
+                      intent.putStringArrayListExtra("names", ArrayList(allChannels.map { it.name }))
+                      intent.putStringArrayListExtra("urls", ArrayList(allChannels.map { it.url }))
+                      startActivity(intent)
+                  }, { ch ->
+                      val currentFavs = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
+                      if (currentFavs.contains(ch.url)) currentFavs.remove(ch.url) else currentFavs.add(ch.url)
+                      prefs.edit().putStringSet("favorites", currentFavs).apply()
+                      updateView(scrollToLast = false)
+                  })
+
+                  b.recycler.post {
+                      if (scrollToLast) scrollToLastChannel()
+                      else b.recycler.getChildAt(0)?.requestFocus()
+                  }
+              }
+
+              private fun readConfig(): Pair<List<Channel>, String> {
+                  val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
+                  val o = JSONObject(json); val manual = mutableListOf<Channel>()
+                  o.optJSONArray("channels")?.let { arr -> for (i in 0 until arr.length()) { val c = arr.getJSONObject(i); manual.add(Channel(c.optString("name"), c.optString("url"), c.optString("logo"), c.optString("group", "VK Video"))) } }
+                  val cats = o.optJSONArray("categories")
+                  return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
+              }
+          }
+          EOF
+
+      - name: "⚙ SettingsActivity"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
+          package com.tvplayer.app
+          import android.app.AlertDialog
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.Color
+          import android.net.Uri
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.content.FileProvider
+          import androidx.lifecycle.lifecycleScope
+          import coil.Coil
+          import com.tvplayer.app.databinding.ActivitySettingsBinding
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
+          import java.io.File
+
+          class SettingsActivity : AppCompatActivity() {
+              private lateinit var b: ActivitySettingsBinding
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
+
+                  b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
+                  b.txtAbout.text = """
+                      Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
+                      
+                      🎯 ВОЗМОЖНОСТИ:
+                      • Просмотр VK Live в высоком качестве
+                      • Автоподгрузка списка каналов
+                      • Выбор качества и формата экрана
+                      • Избранное (долгое нажатие ОК)
+                      • Переключение пультом вверх/вниз
+                      • Панель каналов в плеере (ОК)
+                      • Таймер сна (5м – 5ч)
+                      • Ручное обновление (⬇️ в шапке)
+                      • Умное кэширование + автоочистка
+                      • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
+                      • Pre-flight проверка DoH при старте
+                      • Подробный лог
+                      
+                      ⚙️ ТЕХНОЛОГИИ:
+                      • Резолвер: yt-dlp (Python + Chaquopy)
+                      • Плеер: Media3 (ExoPlayer)
+                      • Сборка: GitHub Actions
+                      
+                      ❤️ Сделано для семьи и друзей.
+                  """.trimIndent()
+
+                  updateCacheInfo()
+
+                  b.btnBack.setOnClickListener { finish() }
+                  b.btnCheckUpdate.setOnClickListener { checkUpdate() }
+
+                  b.btnClearCache.setOnClickListener {
+                      val imageLoader = Coil.imageLoader(this)
+                      imageLoader.diskCache?.clear()
+                      imageLoader.memoryCache?.clear()
+                      StreamCache.clearAll(this)
+                      ChannelCache.clear(this)
+                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
+                      updateCacheInfo()
+                      CrashLogger.info("Settings", "Кэш очищен вручную")
+                  }
+
+                  b.btnFullReset.setOnClickListener {
+                      AlertDialog.Builder(this)
+                          .setTitle("Полный сброс")
+                          .setMessage("Будут удалены:\n\n• Избранное\n• Последний канал\n• Все кэши\n• Лог\n\nПриложение не удалится. Продолжить?")
+                          .setPositiveButton("Сбросить") { _, _ -> performFullReset() }
+                          .setNegativeButton("Отмена", null)
+                          .show()
+                  }
+
+                  b.btnOpenLog.setOnClickListener {
+                      val log = CrashLogger.readAll(this)
+                      AlertDialog.Builder(this)
+                          .setTitle("Лог приложения")
+                          .setMessage(log.takeLast(3000))
+                          .setPositiveButton("Скопировать") { _, _ ->
+                              val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                              clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                              Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                          }
+                          .setNegativeButton("Закрыть", null)
+                          .show()
+                  }
+
+                  b.btnShareLog.setOnClickListener { CrashLogger.share(this) }
+
+                  b.btnExitApp.setOnClickListener {
+                      CrashLogger.info("Settings", "Полный выход")
+                      finishAffinity()
+                      android.os.Process.killProcess(android.os.Process.myPid())
+                  }
+              }
+
+              private fun performFullReset() {
+                  try {
+                      getSharedPreferences("tvplayer", MODE_PRIVATE).edit().clear().apply()
+                      getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
+                      ChannelCache.clear(this)
+                      CrashLogger.clear(this)
+                      val il = Coil.imageLoader(this)
+                      il.diskCache?.clear()
+                      il.memoryCache?.clear()
+                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      Toast.makeText(this, "Полный сброс выполнен", Toast.LENGTH_SHORT).show()
+                      CrashLogger.info("Settings", "Полный сброс: всё очищено")
+                      updateCacheInfo()
+                  } catch (e: Exception) {
+                      CrashLogger.error("Settings", "Ошибка полного сброса", e)
+                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
+                  }
+              }
+
+              private fun checkUpdate() {
+                  b.txtStatus.text = "⏳ Проверка обновлений..."
+                  b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
+                  lifecycleScope.launch {
+                      val info = UpdateChecker.checkForUpdate(this@SettingsActivity)
+                      if (info == null) {
+                          b.txtStatus.text = "✅ У вас актуальная версия"
+                          b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80"))
+                      } else {
+                          b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
+                          b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))
+                          UpdateDialog.show(this@SettingsActivity, info.versionCode, info.changelog) { startUpdateDownload(info.downloadUrl) }
+                      }
+                  }
+              }
+
+              private fun updateCacheInfo() {
+                  try {
+                      val imageCacheSize = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                      val channelsCacheFile = File(filesDir, "channels_cache.json")
+                      val channelsCacheSize = if (channelsCacheFile.exists()) channelsCacheFile.length() else 0L
+                      val logFile = File(filesDir, "app.log")
+                      val logSize = if (logFile.exists()) logFile.length() else 0L
+                      val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE)
+                      val streamSize = streamPrefs.all.values.sumOf { ((it as? String)?.length ?: 0).toLong() }
+                      val totalCache = cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                      val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                      val pythonSize = totalFiles - channelsCacheSize - logSize
+
+                      val stats = buildString {
+                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)}")
+                          appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
+                          appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)}")
+                          appendLine("📝 Лог: ${formatSize(logSize)}")
+                          appendLine("🐍 Python: ${formatSize(pythonSize)}")
+                          appendLine("📦 Cache всего: ${formatSize(totalCache)}")
+                          append("💾 Files всего: ${formatSize(totalFiles)}")
+                      }
+                      b.txtCacheStats.text = stats
+                      b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))
+                  } catch (e: Exception) {
+                      b.txtCacheStats.text = "Не удалось посчитать: ${e.message}"
+                  }
+              }
+
+              private fun formatSize(bytes: Long): String = when {
+                  bytes < 1024 -> "$bytes Б"
+                  bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
+                  else -> String.format("%.1f МБ", bytes / 1024f / 1024f)
+              }
+
+              private fun startUpdateDownload(url: String) {
+                  Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
+                  lifecycleScope.launch {
+                      val file = UpdateChecker.downloadApk(this@SettingsActivity, url)
+                      if (file == null) {
+                          Toast.makeText(this@SettingsActivity, "Не удалось скачать", Toast.LENGTH_LONG).show()
+                          return@launch
+                      }
+                      installApk(file)
+                  }
+              }
+
+              private fun installApk(file: File) {
+                  if (!packageManager.canRequestPackageInstalls()) {
+                      Toast.makeText(this, "Разрешите установку", Toast.LENGTH_LONG).show()
+                      try {
+                          startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                      } catch (_: Exception) {}
+                      return
+                  }
+                  try {
+                      val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      val intent = Intent(Intent.ACTION_VIEW).apply {
+                          setDataAndType(uri, "application/vnd.android.package-archive")
+                          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                      }
+                      startActivity(intent)
+                      CrashLogger.info("OTA", "Установка запущена (update.apk удалится при старте новой версии)")
+                  } catch (e: Exception) {
+                      CrashLogger.error("OTA", "Ошибка установки", e)
+                      Toast.makeText(this, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
+                  }
+              }
+          }
+          EOF
+
+      - name: "🎬 PlayerActivity (DoH через OkHttpDataSource) + коммит"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
+          cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
+          package com.tvplayer.app
+          import android.app.AlertDialog
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.graphics.Color
+          import android.os.Bundle
+          import android.os.CountDownTimer
+          import android.os.Handler
+          import android.os.Looper
+          import android.view.KeyEvent
+          import android.view.View
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.view.WindowCompat
+          import androidx.core.view.WindowInsetsCompat
+          import androidx.core.view.WindowInsetsControllerCompat
+          import androidx.lifecycle.lifecycleScope
+          import androidx.media3.common.C
+          import androidx.media3.common.MediaItem
+          import androidx.media3.common.PlaybackException
+          import androidx.media3.common.Player
+          import androidx.media3.common.TrackSelectionOverride
+          import androidx.media3.common.Tracks
+          import androidx.media3.datasource.okhttp.OkHttpDataSource
+          import androidx.media3.exoplayer.DefaultLoadControl
+          import androidx.media3.exoplayer.ExoPlayer
+          import androidx.media3.exoplayer.hls.HlsMediaSource
+          import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+          import androidx.media3.ui.AspectRatioFrameLayout
+          import androidx.recyclerview.widget.LinearLayoutManager
+          import com.tvplayer.app.databinding.ActivityPlayerBinding
+          import kotlinx.coroutines.launch
+          import okhttp3.OkHttpClient
+          import java.util.concurrent.TimeUnit
+
+          class PlayerActivity : AppCompatActivity() {
+              private lateinit var b: ActivityPlayerBinding
+              private var player: ExoPlayer? = null
+              private lateinit var trackSelector: DefaultTrackSelector
+              private var sleepTimer: CountDownTimer? = null
+              private var names: List<String> = emptyList()
+              private var urls: List<String> = emptyList()
+              private var currentIndex: Int = 0
+              private var retryCount = 0
+              private val MAX_RETRIES = 5
+              private val RETRY_DELAY = 2000L
+              private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+              private val handler = Handler(Looper.getMainLooper())
+              private val hideControlsRunnable = Runnable {
+                  b.controlsOverlay.visibility = View.GONE
+                  b.rightControls.visibility = View.GONE
+                  b.btnSleepTimer.visibility = View.GONE
+                  b.leftControls.visibility = View.GONE
+              }
+              private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  b = ActivityPlayerBinding.inflate(layoutInflater); setContentView(b.root)
+                  WindowCompat.setDecorFitsSystemWindows(window, false)
+                  val controller = WindowInsetsControllerCompat(window, window.decorView)
+                  controller.hide(WindowInsetsCompat.Type.systemBars())
+                  controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+                  b.touchArea.isFocusable = false
+                  b.touchArea.isFocusableInTouchMode = false
+
+                  setupFocusHighlight()
+
+                  names = intent.getStringArrayListExtra("names") ?: emptyList()
+                  urls = intent.getStringArrayListExtra("urls") ?: emptyList()
+                  currentIndex = intent.getIntExtra("index", 0)
+                  startPlayback()
+
+                  b.btnBack.setOnClickListener { finish() }
+                  b.btnExitApp.setOnClickListener { exitApp() }
+                  b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+                  b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
+                  b.btnShowLog.setOnClickListener { showLogDialog() }
+              }
+
+              private fun showLogDialog() {
+                  val log = CrashLogger.readAll(this)
+                  AlertDialog.Builder(this)
+                      .setTitle("Лог приложения")
+                      .setMessage(log.takeLast(3000))
+                      .setPositiveButton("Скопировать") { _, _ ->
+                          val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                          clipboard.setPrimaryClip(ClipData.newPlainText("log", log))
+                          Toast.makeText(this, "Лог скопирован", Toast.LENGTH_SHORT).show()
+                      }
+                      .setNegativeButton("Закрыть", null)
+                      .show()
+              }
+
+              private fun setupFocusHighlight() {
+                  listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->
+                      tv.setOnFocusChangeListener { _, hasFocus ->
+                          tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
+                      }
+                  }
+              }
+
+              private fun toggleAspect() {
+                  currentResizeMode = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) {
+                      AspectRatioFrameLayout.RESIZE_MODE_FIT
+                  } else {
+                      AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                  }
+                  b.playerView.resizeMode = currentResizeMode
+                  b.btnAspect.text = if (currentResizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) "Заполнить" else "Вписать"
+                  CrashLogger.info("Player", "Формат: ${b.btnAspect.text}")
+              }
+
+              private fun exitApp() {
+                  handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
+                  finishAffinity()
+                  android.os.Process.killProcess(android.os.Process.myPid())
+              }
+
+              private fun handleMenuNavigation(keyCode: Int): Boolean {
+                  val cur = currentFocus ?: run { b.btnPlayPause.requestFocus(); return true }
+                  val nextId: Int? = when (cur.id) {
+                      R.id.btnPlayPause -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnQuality
+                          else -> null
+                      }
+                      R.id.btnSleepTimer -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnExitApp
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnQuality
+                          else -> null
+                      }
+                      R.id.btnBack -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnExitApp
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnExitApp -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnBack
+                          KeyEvent.KEYCODE_DPAD_RIGHT -> R.id.btnSleepTimer
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnQuality -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnSleepTimer
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnAspect
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnAspect -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnQuality
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      else -> null
+                  }
+                  if (nextId != null) { findViewById<View>(nextId)?.requestFocus(); return true }
+                  return false
+              }
+
+              override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                  if (b.channelListPanel.visibility == View.VISIBLE) {
+                      if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
+                          b.channelListPanel.visibility = View.GONE
+                          showControls()
+                          return true
+                      }
+                      return super.dispatchKeyEvent(event)
+                  }
+                  if (b.controlsOverlay.visibility == View.VISIBLE) {
+                      if (event.action == KeyEvent.ACTION_DOWN) {
+                          when (event.keyCode) {
+                              KeyEvent.KEYCODE_BACK -> { hideControlsRunnable.run(); return true }
+                              KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                  (currentFocus as? View)?.performClick(); resetHideTimeout(); return true
+                              }
+                              KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                              KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                  val handled = handleMenuNavigation(event.keyCode)
+                                  if (handled) { resetHideTimeout(); return true }
+                                  return true
+                              }
+                          }
+                      }
+                      return true
+                  }
+                  if (event.action == KeyEvent.ACTION_DOWN) {
+                      when (event.keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { switchChannel(-1); return true }
+                          KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { switchChannel(1); return true }
+                          KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MENU -> { showChannelList(); return true }
+                          KeyEvent.KEYCODE_BACK -> { finish(); return true }
+                      }
+                  }
+                  return super.dispatchKeyEvent(event)
+              }
+
+              private fun resetHideTimeout() {
+                  handler.removeCallbacks(hideControlsRunnable)
+                  handler.postDelayed(hideControlsRunnable, 5000)
+              }
+
+              private fun showChannelList() {
+                  val channels = names.mapIndexed { i, n -> Channel(n, urls.getOrNull(i) ?: "", "") }
+                  b.channelListPanel.visibility = View.VISIBLE
+                  b.controlsOverlay.visibility = View.GONE
+                  b.rightControls.visibility = View.GONE
+                  b.btnSleepTimer.visibility = View.GONE
+                  b.leftControls.visibility = View.GONE
+                  b.channelListRecycler.layoutManager = LinearLayoutManager(this)
+                  b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
+                      val idx = urls.indexOf(ch.url)
+                      if (idx >= 0) { currentIndex = idx; startPlayback() }
+                      b.channelListPanel.visibility = View.GONE
+                  }
+                  b.channelListRecycler.scrollToPosition(currentIndex)
+                  b.channelListRecycler.post { b.channelListRecycler.findViewHolderForAdapterPosition(currentIndex)?.itemView?.requestFocus() }
+              }
+
+              private fun switchChannel(direction: Int) {
+                  val newIndex = currentIndex + direction
+                  if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() }
+              }
+
+              private fun startPlayback() {
+                  getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
+                  val chNum = currentIndex + 1
+                  val chName = names.getOrNull(currentIndex) ?: "Канал"
+                  CrashLogger.info("Player", "Открытие #$chNum: $chName")
+                  b.channelNameOverlay.text = "$chNum. $chName"
+                  b.channelNameOverlay.visibility = View.VISIBLE
+                  handler.removeCallbacks(hideChannelOverlayRunnable)
+                  handler.postDelayed(hideChannelOverlayRunnable, 3000)
+                  b.errorLayout.visibility = View.GONE
+                  retryCount = 0
+                  val channelUrl = urls.getOrNull(currentIndex) ?: return
+                  val cached = StreamCache.get(this, channelUrl)
+                  if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
+                  if (!NetworkUtils.isOnline(this)) {
+                      b.progress.visibility = View.GONE
+                      b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."
+                      b.errorLayout.visibility = View.VISIBLE
+                      CrashLogger.info("Player", "Нет интернета")
+                      return
+                  }
+                  b.progress.visibility = View.VISIBLE
+                  lifecycleScope.launch {
+                      val direct = StreamResolver.resolve(channelUrl)
+                      if (direct.startsWith("ERROR")) { handleError(direct); return@launch }
+                      StreamCache.put(this@PlayerActivity, channelUrl, direct)
+                      play(direct)
+                  }
+              }
+
+              private fun buildHttpDataSource(): OkHttpDataSource.Factory {
+                  val okHttp = OkHttpClient.Builder()
+                      .connectTimeout(10, TimeUnit.SECONDS)
+                      .readTimeout(30, TimeUnit.SECONDS)
+                      .dns(DohProvider.createWithFallback(this))
+                      .build()
+                  return OkHttpDataSource.Factory(okHttp)
+                      .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                      .setDefaultRequestProperties(mapOf("Referer" to "https://vk.com/", "Origin" to "https://vk.com"))
+              }
+
+              private fun play(m3u8: String) {
+                  player?.release()
+                  val dataSource = buildHttpDataSource()
+                  val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
+                  trackSelector = DefaultTrackSelector(this)
+                  player = ExoPlayer.Builder(this).setTrackSelector(trackSelector).setLoadControl(loadControl).build().apply {
+                      setMediaSource(HlsMediaSource.Factory(dataSource).createMediaSource(MediaItem.fromUri(m3u8)))
+                      playWhenReady = true; prepare()
+                      addListener(object : Player.Listener {
+                          override fun onTracksChanged(tracks: Tracks) {
+                              updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE
+                              CrashLogger.info("Player", "Воспроизведение началось")
+                          }
+                          override fun onPlayerError(error: PlaybackException) {
+                              super.onPlayerError(error)
+                              CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})")
+                              urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
+                              handleError("Ошибка плеера: ${error.errorCodeName}")
+                          }
+                      })
+                  }
+                  b.playerView.player = player
+                  b.progress.visibility = View.GONE
+                  b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                  showControls()
+                  b.btnQuality.setOnClickListener { showQualityDialog(); resetHideTimeout() }
+                  b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
+                  b.btnPlayPause.setOnClickListener {
+                      player?.let { p ->
+                          if (p.isPlaying) { p.pause(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_play) }
+                          else { p.play(); b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause) }
+                      }
+                      resetHideTimeout()
+                  }
+                  b.touchArea.setOnClickListener {
+                      if (b.controlsOverlay.visibility == View.VISIBLE) hideControlsRunnable.run() else showControls()
+                  }
+              }
+
+              private fun updateQualityButton(tracks: Tracks) {
+                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                  val selectedIndex = (0 until videoGroup.length).firstOrNull { videoGroup.isTrackSelected(it) } ?: return
+                  val format = videoGroup.getTrackFormat(selectedIndex)
+                  val height = if (format.height > 0) "${format.height}p" else "Auto"
+                  val bitrate = if (format.bitrate > 0) " ${format.bitrate / 1000}k" else ""
+                  b.btnQuality.text = height + bitrate
+                  CrashLogger.info("Player", "Качество: $height${bitrate}")
+              }
+
+              private fun showQualityDialog() {
+                  val p = player ?: return
+                  val tracks = p.currentTracks
+                  val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
+                  val qualities = mutableListOf<String>(); qualities.add("Авто (Auto)")
+                  var selectedTrackIndex = -1
+                  for (i in 0 until videoGroup.length) { if (videoGroup.isTrackSelected(i)) { selectedTrackIndex = i; break } }
+                  for (i in 0 until videoGroup.length) {
+                      val format = videoGroup.getTrackFormat(i)
+                      val prefix = if (i == selectedTrackIndex) "▶ " else "   "
+                      val text = if (format.height > 0) "${prefix}${format.height}p (${format.bitrate / 1000} kbps)" else "${prefix}Track $i"
+                      qualities.add(text)
+                  }
+                  AlertDialog.Builder(this).setTitle("Качество видео").setItems(qualities.toTypedArray()) { _, which ->
+                      if (which == 0) trackSelector.parameters = trackSelector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO).setAllowVideoMixedMimeTypeAdaptiveness(true).build()
+                      else trackSelector.parameters = trackSelector.buildUponParameters().setOverrideForType(TrackSelectionOverride(videoGroup.getMediaTrackGroup(), which - 1)).build()
+                  }.show()
+              }
+
+              private fun handleError(errorText: String? = null) {
+                  if (retryCount < MAX_RETRIES) {
+                      retryCount++
+                      b.progress.visibility = View.VISIBLE
+                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES")
+                      handler.postDelayed({ startPlayback() }, RETRY_DELAY)
+                  } else {
+                      b.progress.visibility = View.GONE
+                      val details = errorText ?: "Неизвестная ошибка"
+                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"
+                      b.errorLayout.visibility = View.VISIBLE
+                      b.controlsOverlay.visibility = View.GONE
+                      b.rightControls.visibility = View.GONE
+                      b.btnSleepTimer.visibility = View.GONE
+                      b.leftControls.visibility = View.GONE
+                      CrashLogger.error("Player", "Все попытки исчерпаны")
+                  }
+              }
+
+              private fun showSleepTimerDialog() {
+                  val options = arrayOf("Выключить", "5 минут", "10 минут", "15 минут", "30 минут", "45 минут", "1 час", "2 часа", "3 часа", "4 часа", "5 часов")
+                  val minutes = intArrayOf(0, 5, 10, 15, 30, 45, 60, 120, 180, 240, 300)
+                  AlertDialog.Builder(this).setTitle("Таймер сна").setItems(options) { _, which ->
+                      val mins = minutes[which]
+                      if (mins == 0) cancelSleepTimer() else startSleepTimer(mins)
+                  }.show()
+              }
+
+              private fun startSleepTimer(minutes: Int) {
+                  sleepTimer?.cancel()
+                  CrashLogger.info("Player", "Сон: $minutes мин")
+                  val millis = minutes * 60 * 1000L
+                  sleepTimer = object : CountDownTimer(millis, 1000) {
+                      override fun onTick(millisUntilFinished: Long) {
+                          val m = millisUntilFinished / 1000 / 60; val s = (millisUntilFinished / 1000) % 60
+                          b.btnSleepTimer.text = String.format("Сон: %02d:%02d", m, s); b.btnSleepTimer.setTextColor(Color.parseColor("#FFEB3B"))
+                      }
+                      override fun onFinish() {
+                          CrashLogger.info("Player", "Таймер сработал — выключение")
+                          exitApp()
+                      }
+                  }.start()
+                  resetHideTimeout()
+              }
+
+              private fun cancelSleepTimer() { sleepTimer?.cancel(); sleepTimer = null; b.btnSleepTimer.text = "Сон: Выкл"; b.btnSleepTimer.setTextColor(Color.WHITE) }
+
+              private fun showControls() {
+                  b.controlsOverlay.visibility = View.VISIBLE
+                  b.rightControls.visibility = View.VISIBLE
+                  b.btnSleepTimer.visibility = View.VISIBLE
+                  b.leftControls.visibility = View.VISIBLE
+                  b.btnPlayPause.post { b.btnPlayPause.requestFocus() }
+                  resetHideTimeout()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  CrashLogger.info("Player", "Закрытие")
+                  handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
+              }
+          }
+          EOF
+
+          RUN_NUMBER="${{ github.run_number }}"
+          sed -i "s/versionCode = [0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          git commit -m "feat: full DoH (Python urllib + Coil + OkHttp singleton) with fallback" || echo "no changes"
+          git push || echo "push failed"
+
+      - name: "🔨 Build APK"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        id: build
+        run: |
+          set +e
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_build.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "─── Что упало ───"; grep -A 20 "What went wrong" /tmp/gradle_build.log | head -25; tail -50 /tmp/gradle_build.log; exit 1
+          fi
+          echo "✅ Gradle OK"
+
+      - name: "📦 Prepare APK"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        id: apk
+        run: |
+          SRC=$(find app/build/outputs/apk/release -name "*.apk" -type f | head -1)
+          RUN_NUMBER="${{ github.run_number }}"
+          TAG="v${RUN_NUMBER}"
+          FILE="TVPlayer_v${RUN_NUMBER}.apk"
+          cp "$SRC" "$FILE"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+
+      - name: "🚀 Release"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          name: TV Player v${{ github.run_number }}
+          body: |
+            ## Сборка #${{ github.run_number }}
+
+            🌐 **DNS-over-HTTPS (AdGuard) — полное внедрение:**
+
+            **Что теперь покрыто DoH (все сетевые модули приложения):**
+            - ✅ **VK API** (загрузка списка каналов) — `OkHttpClient` с `DohProvider`
+            - ✅ **OTA** (проверка обновлений, скачивание APK) — `OkHttpClient` с `DohProvider`
+            - ✅ **Плеер** (запросы `m3u8`/HLS-сегментов) — `OkHttpDataSource` с `DohProvider`
+            - ✅ **Python `yt-dlp`** (резолв VK-страницы) — monkey-patch `socket.getaddrinfo` → DoH (через stdlib `urllib`, без `httpx`)
+            - ✅ **Coil** (логотипы каналов) — `ImageLoader` с `OkHttpClient` + `DohProvider`
+
+            **Не покрыто (физически невозможно из приложения):**
+            - ❌ Системный DNS Android (captive portal, служебные запросы ОС)
+
+            **Как работает фолбэк:**
+            - Везде: сначала AdGuard DoH → если пусто/таймаут/ошибка → `Dns.SYSTEM` (системный DNS Android).
+            - `Dns.SYSTEM` = DNS от провайдера, Google DNS, Cloudflare DoT или DNS локального VPN.
+            - В Python — плюс circuit breaker: 3 подряд ошибки DoH → пауза 60 секунд → резолв через системный DNS.
+
+            **Pre-flight проверка DoH при старте приложения:**
+            - Kotlin-часть: `DohProvider.testDoh()` — резолв `example.com` напрямую через AdGuard DoH (без фолбэка).
+            - Python-часть: `resolver.doh_health()` — состояние `dnspython`, кэша и circuit breaker.
+            - Результат — в логе (`Настройки → Открыть лог`):
+              ```
+              [DoH] ✅ DoH AdGuard работает (example.com → X.X.X.X, XXXмс)
+              [DoH] Python DoH health: {'available': True, 'consecutive_fails': 0, 'cooldown_active': False, 'cache_size': 5}
+              ```
+
+            📦 Скачайте APK ниже и установите поверх старой версии.
+          files: ${{ steps.apk.outputs.file }}
+          make_latest: true
