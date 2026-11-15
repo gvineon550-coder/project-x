@@ -49,12 +49,48 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
+      - name: "🌐 Pre-flight проверка DoH AdGuard"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        continue-on-error: true
+        run: |
+          pip install --quiet dnspython
+          python3 - << 'PYEOF'
+          import sys
+          try:
+              import dns.message, dns.query, dns.rdatatype
+          except ImportError as e:
+              print(f"⚠️ dnspython не установлен: {e}")
+              sys.exit(0)
+          try:
+              q = dns.message.make_query("example.com", dns.rdatatype.A)
+              r = dns.query.https(q, "https://dns.adguard-dns.com/dns-query", timeout=10)
+              if r.answer:
+                  print(f"✅ DoH AdGuard работает (example.com → {r.answer[0][0]})")
+              else:
+                  print("⚠️ DoH AdGuard ответил, но без A-записей")
+          except Exception as e:
+              print(f"⚠️ DoH AdGuard недоступен из CI: {type(e).__name__}: {e}")
+              print("   Это НЕ блокирует сборку — в приложении есть фолбэк на системный DNS")
+          try:
+              q2 = dns.message.make_query("doubleclick.net", dns.rdatatype.A)
+              r2 = dns.query.https(q2, "https://dns.adguard-dns.com/dns-query", timeout=10)
+              if r2.answer and any(str(rr) == "0.0.0.0" for rr in r2.answer[0]):
+                  print("✅ DoH AdGuard блокирует рекламу (doubleclick.net → 0.0.0.0)")
+              elif r2.answer:
+                  print(f"ℹ️ DoH AdGuard резолвит doubleclick.net → {r2.answer[0][0]} (без блокировки)")
+              else:
+                  print("ℹ️ DoH AdGuard вернул NXDOMAIN для doubleclick.net (тоже блокировка)")
+          except Exception as e:
+              print(f"ℹ️ Проверка блокировки не удалась: {type(e).__name__}")
+          PYEOF
+
       - name: "📦 Манифест, иконки, сплэш, фоны, layout"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           pip install --quiet Pillow
 
           python3 - << 'PYEOF'
+          import re
           path = "app/build.gradle"
           with open(path) as f: txt = f.read()
           if "buildConfig = true" not in txt:
@@ -69,16 +105,49 @@ jobs:
                   'implementation("androidx.lifecycle:lifecycle-service:2.8.3")',
                   'implementation("androidx.lifecycle:lifecycle-service:2.8.3")\n    implementation("androidx.core:core-splashscreen:1.0.1")'
               )
-          if "okhttp-dnsoverhttps" not in txt:
+          if "okhttp-dnsoverhttps" not in txt or "media3-datasource-okhttp" not in txt:
+              deps = []
+              if "okhttp-dnsoverhttps" not in txt:
+                  deps.append('    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")')
+              if "media3-datasource-okhttp" not in txt:
+                  deps.append('    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")')
               txt = txt.replace(
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
-                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")'
+                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n' + "\n".join(deps)
               )
-          if "media3-datasource-okhttp" not in txt:
-              txt = txt.replace(
-                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
-                  'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n    implementation("androidx.media3:media3-datasource-okhttp:1.4.1")'
-              )
+          # Defensive: полностью сбрасываем chaquopy-блок, независимо от текущего состояния
+          chaquopy_match = re.search(r'^chaquopy\s*\{', txt, re.MULTILINE)
+          if chaquopy_match:
+              start = chaquopy_match.start()
+              brace_pos = txt.find('{', start)
+              depth = 0
+              end = -1
+              for i in range(brace_pos, len(txt)):
+                  if txt[i] == '{':
+                      depth += 1
+                  elif txt[i] == '}':
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+              if end != -1:
+                  while end < len(txt) and txt[end] == '\n':
+                      end += 1
+                  txt = txt[:start] + txt[end:]
+          chaquopy_block = '\n'.join([
+              'chaquopy {',
+              '    defaultConfig {',
+              '        version = "3.11"',
+              '        pip {',
+              '            install("yt-dlp")',
+              '            install("dnspython")',
+              '        }',
+              '    }',
+              '}',
+              '',
+              '',
+          ])
+          txt = txt.replace('dependencies {', chaquopy_block + 'dependencies {', 1)
           with open(path, "w") as f: f.write(txt)
           PYEOF
 
@@ -933,14 +1002,102 @@ jobs:
               android:background="?attr/selectableItemBackground" />
           EOF
 
-      - name: "🐍 Python"
+      - name: "🐍 Python (полное DoH: urllib + dnspython wire, без httpx)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
-          import yt_dlp
-          import urllib.request
-          import re
           import socket
+          import time
+          import urllib.request
+
+          DOH_URL = "https://dns.adguard-dns.com/dns-query"
+          DOH_HOSTS = {"dns.adguard-dns.com", "dns.google", "cloudflare-dns.com", "dns.quad9.net"}
+          DOH_TIMEOUT = 2
+          DNS_CACHE = {}
+          DNS_TTL = 300
+          _doh_fail_until = 0.0
+          _doh_consecutive_fails = 0
+          _DOH_MAX_FAILS = 3
+          _DOH_COOLDOWN = 60
+
+          try:
+              import dns.message
+              import dns.rdatatype
+              _DNS_AVAILABLE = True
+          except Exception:
+              _DNS_AVAILABLE = False
+
+          _orig_getaddrinfo = socket.getaddrinfo
+
+          def _doh_lookup(host, timeout=DOH_TIMEOUT):
+              q = dns.message.make_query(host, dns.rdatatype.A)
+              req = urllib.request.Request(
+                  DOH_URL,
+                  data=q.to_wire(),
+                  headers={
+                      "Content-Type": "application/dns-message",
+                      "Accept": "application/dns-message",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  wire = resp.read()
+              msg = dns.message.from_wire(wire)
+              ips = []
+              if msg.answer:
+                  for rrset in msg.answer:
+                      for rr in rrset:
+                          ips.append(str(rr))
+              return ips
+
+          def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+              global _doh_fail_until, _doh_consecutive_fails
+              if not _DNS_AVAILABLE or host in DOH_HOSTS:
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              if family not in (0, socket.AF_INET):
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              if time.time() < _doh_fail_until:
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              now = time.time()
+              cached = DNS_CACHE.get(host)
+              if cached and (now - cached[1]) < DNS_TTL:
+                  ips = cached[0]
+              else:
+                  try:
+                      ips = _doh_lookup(host)
+                      if not ips:
+                          _doh_consecutive_fails = 0
+                          return _orig_getaddrinfo(host, port, family, type, proto, flags)
+                      DNS_CACHE[host] = (ips, now)
+                      _doh_consecutive_fails = 0
+                  except Exception:
+                      _doh_consecutive_fails += 1
+                      if _doh_consecutive_fails >= _DOH_MAX_FAILS:
+                          _doh_fail_until = time.time() + _DOH_COOLDOWN
+                      return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              result = []
+              for ip in ips:
+                  try:
+                      result.append((socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port)))
+                  except Exception:
+                      pass
+              if not result:
+                  return _orig_getaddrinfo(host, port, family, type, proto, flags)
+              return result
+
+          socket.getaddrinfo = _doh_getaddrinfo
+
+          def doh_health():
+              return {
+                  "available": _DNS_AVAILABLE,
+                  "consecutive_fails": _doh_consecutive_fails,
+                  "cooldown_active": time.time() < _doh_fail_until,
+                  "cooldown_remaining": max(0, int(_doh_fail_until - time.time())),
+                  "cache_size": len(DNS_CACHE),
+              }
+
+          import yt_dlp
+          import re
           socket.setdefaulttimeout(15)
           HEADERS = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1082,12 +1239,27 @@ jobs:
 
           cat > app/src/main/java/com/tvplayer/app/TVPlayerApp.kt << 'EOF'
           package com.tvplayer.app
+          import com.chaquo.python.Python
           import com.chaquo.python.android.PyApplication
 
           class TVPlayerApp : PyApplication() {
               override fun onCreate() {
                   super.onCreate()
                   CrashLogger.init(this)
+                  Thread {
+                      try {
+                          DohProvider.testDoh(this)
+                      } catch (e: Exception) {
+                          CrashLogger.error("DoH", "Ошибка pre-flight проверки DoH", e)
+                      }
+                      try {
+                          val m = Python.getInstance().getModule("resolver")
+                          val health = m.callAttr("doh_health").toString()
+                          CrashLogger.info("DoH", "Python DoH health: $health")
+                      } catch (e: Exception) {
+                          CrashLogger.error("DoH", "Не удалось получить Python DoH health", e)
+                      }
+                  }.apply { name = "DohPreflight"; isDaemon = true }.start()
               }
           }
           EOF
@@ -1120,7 +1292,7 @@ jobs:
           }
           EOF
 
-      - name: "🌐 DoH Provider с фолбэком на системный DNS"
+      - name: "🌐 DoH Provider (синглтон)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/DohProvider.kt << 'EOF'
@@ -1137,23 +1309,29 @@ jobs:
 
           object DohProvider {
               private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
+              private const val TEST_DOMAIN = "example.com"
 
-              /**
-               * Возвращает кастомный Dns с фолбэком на Dns.SYSTEM.
-               * Если DoH недоступен/не ответил — происходит автоматический
-               * откат на системный DNS (без DoH).
-               */
+              @Volatile private var cached: Dns? = null
+
               fun createWithFallback(context: Context): Dns {
+                  cached?.let { return it }
+                  synchronized(this) {
+                      cached?.let { return it }
+                      val created = build(context.applicationContext)
+                      cached = created
+                      return created
+                  }
+              }
+
+              private fun build(context: Context): Dns {
                   val httpClient = OkHttpClient.Builder().build()
                   val doh = try {
-                      // Bootstrap-клиент с кэшем (10 МБ) — чтобы DoH-запросы кэшировались
                       val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
                       val bootstrapClient = httpClient.newBuilder().cache(cache).build()
-
                       DnsOverHttps.Builder()
                           .client(bootstrapClient)
                           .url(DOH_URL.toHttpUrl())
-                          .includeIPv6(false) // IPv4 безопаснее и стабильнее на Android TV
+                          .includeIPv6(false)
                           .build()
                   } catch (e: Exception) {
                       CrashLogger.error("DoH", "Не удалось создать DoH — используем системный DNS", e)
@@ -1165,18 +1343,12 @@ jobs:
                           if (doh != null) {
                               try {
                                   val result = doh.lookup(hostname)
-                                  if (result.isNotEmpty()) {
-                                      // DoH сработал
-                                      return result
-                                  }
-                                  // Пустой результат — AdGuard заблокировал или не ответил
+                                  if (result.isNotEmpty()) return result
                                   CrashLogger.info("DoH", "Пустой ответ для $hostname — фолбэк на системный DNS")
                               } catch (e: Exception) {
-                                  // Ошибка DoH (таймаут, нет сети, сертификат и т.д.)
                                   CrashLogger.info("DoH", "Ошибка DoH для $hostname: ${e.message} — фолбэк на системный DNS")
                               }
                           }
-                          // ФОЛБЭК: системный DNS, если DoH нет или он не сработал
                           return try {
                               Dns.SYSTEM.lookup(hostname)
                           } catch (e: UnknownHostException) {
@@ -1187,28 +1359,33 @@ jobs:
                   }
               }
 
-              /**
-               * Проверка работоспособности DoH.
-               * Возвращает true, если AdGuard DNS резолвит домен (любой),
-               * и false — если DoH не отвечает.
-               */
               fun testDoh(context: Context): Boolean {
                   return try {
-                      val dns = createWithFallback(context)
-                      // Пробуем резолвить заведомо существующий домен через DoH
-                      val result = dns.lookup("dns.adguard-dns.com")
-                      val ok = result.isNotEmpty()
-                      CrashLogger.info("DoH", if (ok) "✅ DoH работает" else "⚠️ DoH вернул пустой результат")
-                      ok
+                      val client = OkHttpClient.Builder().build()
+                      val doh = DnsOverHttps.Builder()
+                          .client(client)
+                          .url(DOH_URL.toHttpUrl())
+                          .includeIPv6(false)
+                          .build()
+                      val started = System.currentTimeMillis()
+                      val result = doh.lookup(TEST_DOMAIN)
+                      val elapsed = System.currentTimeMillis() - started
+                      if (result.isNotEmpty()) {
+                          CrashLogger.info("DoH", "✅ DoH AdGuard работает ($TEST_DOMAIN → ${result.first().hostAddress}, ${elapsed}мс)")
+                          true
+                      } else {
+                          CrashLogger.info("DoH", "⚠️ DoH AdGuard вернул пустой ответ для $TEST_DOMAIN (${elapsed}мс)")
+                          false
+                      }
                   } catch (e: Exception) {
-                      CrashLogger.error("DoH", "❌ DoH тест провален", e)
+                      CrashLogger.error("DoH", "❌ DoH AdGuard не работает: ${e.javaClass.simpleName}: ${e.message}", e)
                       false
                   }
               }
           }
           EOF
 
-      - name: "🧠 Kotlin Core (DoH в OkHttpClient)"
+      - name: "🧠 Kotlin Core"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/VkApi.kt << 'EOF'
@@ -1223,7 +1400,6 @@ jobs:
 
           data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
 
-          // Клиент с DoH + фолбэком на системный DNS
           private fun buildClient(context: android.content.Context): OkHttpClient {
               return OkHttpClient.Builder()
                   .connectTimeout(10, TimeUnit.SECONDS)
@@ -1617,7 +1793,7 @@ jobs:
           }
           EOF
 
-      - name: "🧠 MainActivity (автоочистка + DoH в PlayerDataSource)"
+      - name: "🧠 MainActivity (Coil через DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/MainActivity.kt << 'EOF'
@@ -1644,8 +1820,10 @@ jobs:
           import coil.disk.DiskCache
           import com.tvplayer.app.databinding.ActivityMainBinding
           import kotlinx.coroutines.launch
+          import okhttp3.OkHttpClient
           import org.json.JSONObject
           import java.io.File
+          import java.util.concurrent.TimeUnit
 
           class MainActivity : AppCompatActivity(), ImageLoaderFactory {
               private lateinit var b: ActivityMainBinding
@@ -1656,7 +1834,13 @@ jobs:
               private var needScrollOnResume = false
 
               override fun newImageLoader(): ImageLoader {
+                  val dohOkHttp = OkHttpClient.Builder()
+                      .connectTimeout(10, TimeUnit.SECONDS)
+                      .readTimeout(20, TimeUnit.SECONDS)
+                      .dns(DohProvider.createWithFallback(this))
+                      .build()
                   return ImageLoader.Builder(this)
+                      .okHttpClient(dohOkHttp)
                       .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
                       .build()
               }
@@ -1972,7 +2156,7 @@ jobs:
           }
           EOF
 
-      - name: "⚙ SettingsActivity (тест DoH)"
+      - name: "⚙ SettingsActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/SettingsActivity.kt << 'EOF'
@@ -2018,7 +2202,8 @@ jobs:
                       • Таймер сна (5м – 5ч)
                       • Ручное обновление (⬇️ в шапке)
                       • Умное кэширование + автоочистка
-                      • DNS-over-HTTPS (AdGuard) с фолбэком
+                      • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
+                      • Pre-flight проверка DoH при старте
                       • Подробный лог
                       
                       ⚙️ ТЕХНОЛОГИИ:
@@ -2184,7 +2369,7 @@ jobs:
           }
           EOF
 
-      - name: "🎬 PlayerActivity (DoH через OkHttpDataSource) + коммит"
+      - name: "🎬 PlayerActivity + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -2212,7 +2397,6 @@ jobs:
           import androidx.media3.common.Player
           import androidx.media3.common.TrackSelectionOverride
           import androidx.media3.common.Tracks
-          import androidx.media3.datasource.DefaultHttpDataSource
           import androidx.media3.datasource.okhttp.OkHttpDataSource
           import androidx.media3.exoplayer.DefaultLoadControl
           import androidx.media3.exoplayer.ExoPlayer
@@ -2514,14 +2698,13 @@ jobs:
                   val tracks = p.currentTracks
                   val videoGroup = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO } ?: return
                   val qualities = mutableListOf<String>(); qualities.add("Авто (Auto)")
-                  val formats = mutableListOf<androidx.media3.common.Format>()
                   var selectedTrackIndex = -1
                   for (i in 0 until videoGroup.length) { if (videoGroup.isTrackSelected(i)) { selectedTrackIndex = i; break } }
                   for (i in 0 until videoGroup.length) {
                       val format = videoGroup.getTrackFormat(i)
                       val prefix = if (i == selectedTrackIndex) "▶ " else "   "
                       val text = if (format.height > 0) "${prefix}${format.height}p (${format.bitrate / 1000} kbps)" else "${prefix}Track $i"
-                      qualities.add(text); formats.add(format)
+                      qualities.add(text)
                   }
                   AlertDialog.Builder(this).setTitle("Качество видео").setItems(qualities.toTypedArray()) { _, which ->
                       if (which == 0) trackSelector.parameters = trackSelector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO).setAllowVideoMixedMimeTypeAdaptiveness(true).build()
@@ -2598,7 +2781,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: DoH (AdGuard) with automatic fallback to system DNS" || echo "no changes"
+          git commit -m "feat: full DoH (Python urllib + Coil + OkHttp singleton) with fallback" || echo "no changes"
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
@@ -2635,25 +2818,31 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🌐 **DNS-over-HTTPS (AdGuard) с фолбэком:**
+            🌐 **DNS-over-HTTPS (AdGuard) — полное внедрение:**
 
-            **Как работает:**
-            - Все запросы приложения (VK API, логотипы, GitHub) идут через **DoH** `https://dns.adguard-dns.com/dns-query`.
-            - Если AdGuard недоступен или вернул пустой результат — **автоматический фолбэк** на системный DNS (тот, что даёт интернет-провайдер).
-            - **Видеопоток VK идёт напрямую с CDN** (DoH применяется только к API/метаданным, не к самому видео).
+            **Что покрыто DoH:**
+            - ✅ VK API (список каналов) — `OkHttpClient` + `DohProvider`
+            - ✅ OTA (проверка и скачивание APK) — `OkHttpClient` + `DohProvider`
+            - ✅ Плеер (m3u8/HLS) — `OkHttpDataSource` + `DohProvider`
+            - ✅ Python `yt-dlp` — monkey-patch `socket.getaddrinfo` → DoH через stdlib `urllib`
+            - ✅ Coil (логотипы) — `ImageLoader.okHttpClient(...)` + `DohProvider`
 
-            **Проверка в логе:**
-            ```
-            [DoH] ✅ DoH работает
-            [DoH] Ошибка DoH для api.vkvideo.ru: timeout — фолбэк на системный DNS
-            [DoH] Пустой ответ для doubleclick.net — фолбэк на системный DNS
-            ```
+            **Не покрыто (физически невозможно из приложения):**
+            - ❌ Системный DNS Android (captive portal, служебные запросы ОС)
 
-            **Безопасность:**
-            - DoH не трогает видеопоток → воспроизведение не ломается.
-            - При недоступности AdGuard — тихий фолбэк → приложение работает как обычно.
-            - Вся логика в `DohProvider.kt` — можно отключить одной правкой.
+            **Фолбэк:**
+            - Везде: AdGuard DoH → `Dns.SYSTEM` (системный DNS Android)
+            - В Python: circuit breaker — 3 ошибки подряд → пауза 60с → системный DNS
 
-            📦 Скачайте APK ниже и установите поверх старой версии.
+            **Pre-flight проверка DoH:**
+            - CI: `example.com` + `doubleclick.net` через AdGuard DoH
+            - При старте приложения: `DohProvider.testDoh()` + `resolver.doh_health()`
+            - В логе (`Настройки → Открыть лог`):
+              ```
+              [DoH] ✅ DoH AdGuard работает (example.com → ..., ...мс)
+              [DoH] Python DoH health: {'available': True, 'consecutive_fails': 0, ...}
+              ```
+
+            📦 Скачайте APK и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
