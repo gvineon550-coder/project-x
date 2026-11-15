@@ -36,8 +36,8 @@ class SettingsActivity : AppCompatActivity() {
             • Переключение каналов пультом вверх/вниз
             • Панель каналов прямо в плеере (нажатие ОК)
             • Таймер сна (от 5 минут до 5 часов)
-            • Авто-обновление приложения
-            • Умное кэширование ссылок и очистка кэша
+            • Ручное обновление (кнопка ⬇️ на главном экране)
+            • Умное кэширование и автоочистка
             • Подробный лог всех операций
             
             ⚙️ ТЕХНОЛОГИИ:
@@ -45,7 +45,7 @@ class SettingsActivity : AppCompatActivity() {
             • Плеер: AndroidX Media3 (ExoPlayer)
             • Сборка: GitHub Actions (CI/CD)
             
-            🔄 Обновления выходят автоматически. При запуске приложение само проверяет наличие новой версии и предлагает обновиться.
+            🔄 Обновления: при выходе новой версии нажмите ⬇️ в шапке главного экрана.
             
             ❤️ Сделано с любовью для семьи и друзей.
         """.trimIndent()
@@ -53,8 +53,7 @@ class SettingsActivity : AppCompatActivity() {
         updateCacheInfo()
 
         b.btnBack.setOnClickListener { finish() }
-        checkUpdate(silent = true)
-        b.btnCheckUpdate.setOnClickListener { checkUpdate(silent = false) }
+        b.btnCheckUpdate.setOnClickListener { checkUpdate() }
 
         b.btnClearCache.setOnClickListener {
             val imageLoader = Coil.imageLoader(this)
@@ -93,7 +92,7 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun checkUpdate(silent: Boolean) {
+    private fun checkUpdate() {
         b.txtStatus.text = "⏳ Проверка обновлений..."
         b.txtStatus.setTextColor(Color.parseColor("#FF8A8D93"))
         lifecycleScope.launch {
@@ -101,7 +100,6 @@ class SettingsActivity : AppCompatActivity() {
             if (info == null) {
                 b.txtStatus.text = "✅ У вас актуальная версия"
                 b.txtStatus.setTextColor(Color.parseColor("#FF4ADE80"))
-                if (!silent) Toast.makeText(this@SettingsActivity, "Обновлений нет", Toast.LENGTH_SHORT).show()
             } else {
                 b.txtStatus.text = "🎉 Доступно обновление v${info.versionCode}!"
                 b.txtStatus.setTextColor(Color.parseColor("#FFFACC15"))

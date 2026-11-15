@@ -31,12 +31,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var backPressedTime: Long = 0
     private var needScrollOnResume = false
 
-    companion object {
-        // ⚡ Живёт в памяти JVM-процесса, не сбрасывается при пересоздании Activity.
-        // Гарантирует: 1 проверка OTA на запуск приложения.
-        @Volatile private var otaCheckedThisSession = false
-    }
-
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
@@ -48,12 +42,18 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
-        autoCleanCache()
-        b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+
+        // Автоочистка кэшей при старте (БЕЗ проверки OTA)
+        performStartupCleanup()
+
+        b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Нажата кнопка Обновить каналы"); loadFromNetwork(forceRefresh = true) }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
         b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
+
         b.btnFavFilter.nextFocusDownId = R.id.recycler
         b.btnRefresh.nextFocusDownId = R.id.recycler
+        b.btnCheckUpdates.nextFocusDownId = R.id.recycler
         b.btnSettings.nextFocusDownId = R.id.recycler
         b.error.setOnClickListener { showLogDialog() }
 
@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         })
 
         loadInitial()
-        checkForUpdates()
+        // НЕТ автоматической проверки OTA — только по кнопке ⬇️ или в настройках
     }
 
     override fun onResume() {
@@ -88,6 +88,41 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             b.recycler.postDelayed({
                 b.recycler.findViewHolderForAdapterPosition(lastIndex)?.itemView?.requestFocus()
             }, 100)
+        }
+    }
+
+    // ═══ СТАРТОВАЯ АВТООЧИСТКА ═══
+    // Чистит: update.apk, просроченные StreamCache, старые файлы в cacheDir
+    private fun performStartupCleanup() {
+        try {
+            // 1. update.apk — 37 МБ после скачивания, больше не нужен
+            val updateApk = File(cacheDir, "update.apk")
+            if (updateApk.exists()) {
+                val size = updateApk.length() / 1024 / 1024
+                updateApk.delete()
+                CrashLogger.info("Cleanup", "Удалён update.apk ($size МБ)")
+            }
+
+            // 2. StreamCache — просроченные записи (>2ч)
+            StreamCache.cleanup(this)
+
+            // 3. cacheDir — если >15 МБ, чистим всё (кроме update.apk, его уже нет)
+            var totalSize = 0L
+            cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
+            if (totalSize > 15 * 1024 * 1024) {
+                val sizeMb = totalSize / 1024 / 1024
+                cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                CrashLogger.info("Cleanup", "cacheDir очищен ($sizeMb МБ)")
+            }
+
+            // 4. Логируем итоговые размеры (для контроля)
+            var filesSize = 0L
+            filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+            var cacheSize = 0L
+            cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
+            CrashLogger.info("Cleanup", "Размеры: files=${filesSize / 1024}КБ, cache=${cacheSize / 1024}КБ")
+        } catch (e: Exception) {
+            CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
         }
     }
 
@@ -154,6 +189,28 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
+    // ═══ РУЧНАЯ ПРОВЕРКА OTA (по кнопке ⬇️) ═══
+    private fun manualCheckForUpdates() {
+        CrashLogger.info("OTA", "→ Ручная проверка (по кнопке)")
+        if (!NetworkUtils.isOnline(this)) {
+            Toast.makeText(this, "Нет подключения к интернету", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "Проверка обновлений...", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val info = UpdateChecker.checkForUpdate(this@MainActivity)
+            if (info == null) {
+                Toast.makeText(this@MainActivity, "✅ У вас последняя версия (v${BuildConfig.VERSION_CODE})", Toast.LENGTH_LONG).show()
+            } else {
+                UpdateDialog.show(
+                    this@MainActivity,
+                    info.versionCode,
+                    info.changelog,
+                ) { startUpdateDownload(info.downloadUrl) }
+            }
+        }
+    }
+
     private fun showLogDialog() {
         val log = CrashLogger.readAll(this)
         AlertDialog.Builder(this)
@@ -169,58 +226,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             .show()
     }
 
-    private fun autoCleanCache() {
-        var totalSize = 0L
-        cacheDir.walkTopDown().forEach { if (it.isFile) totalSize += it.length() }
-        if (totalSize > 15 * 1024 * 1024) {
-            cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            CrashLogger.info("MainActivity", "Автоочистка кэша картинок")
-        }
-    }
-
     private fun exitApp() {
         finishAffinity()
         android.os.Process.killProcess(android.os.Process.myPid())
-    }
-
-    // ═══ OTA-ЗАЩИТА (план А): @Volatile флаг в companion object ═══
-    private fun checkForUpdates() {
-        // Уровень 1: сессионный флаг — НЕ сбрасывается при пересоздании Activity
-        if (otaCheckedThisSession) {
-            CrashLogger.info("OTA", "Пропуск (уже проверяли в этой сессии)")
-            return
-        }
-
-        val currentVersion = BuildConfig.VERSION_CODE
-        val lastVersion = prefs.getInt("last_ota_version", 0)
-        val lastCheck = prefs.getLong("last_ota_check", 0L)
-        val sinceLast = System.currentTimeMillis() - lastCheck
-
-        CrashLogger.info("OTA", "Debug: current=v$currentVersion, lastChecked=v$lastVersion, sinceLast=${sinceLast / 60000}мин")
-
-        // Уровень 2: prefs — 6 часов между разными запусками приложения
-        if (lastCheck != 0L && lastVersion == currentVersion && sinceLast < 6 * 60 * 60 * 1000L) {
-            otaCheckedThisSession = true
-            CrashLogger.info("OTA", "Пропуск (v$currentVersion, ${sinceLast / 60000}мин назад)")
-            return
-        }
-
-        // Оба уровня пройдены — запускаем и ставим флаг СРАЗУ
-        otaCheckedThisSession = true
-        prefs.edit()
-            .putInt("last_ota_version", currentVersion)
-            .putLong("last_ota_check", System.currentTimeMillis())
-            .commit()
-        CrashLogger.info("OTA", "Запуск проверки (сессия+prefs)")
-
-        lifecycleScope.launch {
-            val info = UpdateChecker.checkForUpdate(this@MainActivity) ?: return@launch
-            UpdateDialog.show(
-                this@MainActivity,
-                info.versionCode,
-                info.changelog,
-            ) { startUpdateDownload(info.downloadUrl) }
-        }
     }
 
     private fun startUpdateDownload(url: String) {

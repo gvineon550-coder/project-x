@@ -1,8 +1,10 @@
 package com.tvplayer.app
 import android.content.Context
+
 object StreamCache {
     private const val PREFS = "stream_cache"
-    private const val TTL_MS = 2 * 60 * 60 * 1000L
+    private const val TTL_MS = 2 * 60 * 60 * 1000L  // 2 часа
+
     fun get(context: Context, channelUrl: String): String? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val entry = prefs.getString(channelUrl, null) ?: return null
@@ -16,16 +18,46 @@ object StreamCache {
         }
         return url
     }
+
     fun put(context: Context, channelUrl: String, m3u8: String) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().putString(channelUrl, "$m3u8|${System.currentTimeMillis()}").apply()
     }
+
     fun invalidate(context: Context, channelUrl: String) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().remove(channelUrl).apply()
     }
+
     fun clearAll(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.edit().clear().apply()
+    }
+
+    // Очищает все просроченные записи (старше TTL). Вызывается при старте приложения.
+    fun cleanup(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val all = prefs.all
+        if (all.isEmpty()) return
+        val editor = prefs.edit()
+        var removed = 0
+        val now = System.currentTimeMillis()
+        for ((key, value) in all) {
+            if (value is String) {
+                val parts = value.split("|")
+                if (parts.size != 2) {
+                    editor.remove(key); removed++
+                } else {
+                    val ts = parts[1].toLongOrNull() ?: 0L
+                    if (now - ts > TTL_MS) {
+                        editor.remove(key); removed++
+                    }
+                }
+            } else {
+                editor.remove(key); removed++
+            }
+        }
+        editor.apply()
+        if (removed > 0) CrashLogger.info("StreamCache", "Очищено $removed просроченных записей")
     }
 }
