@@ -1,3 +1,5 @@
+[![Build & Release TV Player](https://github.com/gvineon550-coder/project-x/actions/workflows/bootstrap-and-build.yml/badge.svg)](https://github.com/gvineon550-coder/project-x/actions/workflows/bootstrap-and-build.yml)
+
 # 📺 TV Player — Неофициальный клиент VK Live
 
 Лёгкий, быстрый и **защищённый** клиент для просмотра стримов VK Live на Android TV и мобильных устройствах.
