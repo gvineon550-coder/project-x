@@ -978,7 +978,7 @@ jobs:
                   android:background="@drawable/button_focus_bg"
                   android:paddingHorizontal="20dp"
                   android:paddingVertical="10dp"
-                  android:text="🔄 Переподключение к потоку..."
+                  text="🔄 Переподключение к потоку..."
                   android:textColor="#FFEB3B"
                   android:textSize="16sp"
                   android:textStyle="bold"
@@ -1951,7 +1951,7 @@ jobs:
           }
           EOF
 
-      - name: "🎬 PlayerActivity (с Prefetch, Watchdog, Quality Picker и Режимом сна)"
+      - name: "🎬 PlayerActivity (с Prefetch, Watchdog, Quality Mode и Режимом сна)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -2030,7 +2030,10 @@ jobs:
                   startPlayback()
                   b.btnBack.setOnClickListener { finish() }
                   b.btnSleepTimer.setOnClickListener { toggleSleepTimer() }
-                  b.btnQuality.setOnClickListener { cycleQuality() }
+                  b.btnQuality.setOnClickListener { 
+                      b.btnQuality.text = "Качество: Auto (HLS)"
+                      showControls()
+                  }
 
                   resetInactivityTimer()
                   handler.postDelayed(watchdogRunnable, 10000)
@@ -2068,25 +2071,6 @@ jobs:
                   }
               }
 
-              private fun cycleQuality() {
-                  val p = player ?: return
-                  val currentParams = p.trackSelectionParameters
-                  val currentMaxH = currentParams.maxVideoHeight
-                  
-                  val newMaxH = when (currentMaxH) {
-                      Int.MAX_VALUE -> 720
-                      720 -> 480
-                      else -> Int.MAX_VALUE
-                  }
-                  
-                  p.trackSelectionParameters = currentParams.buildUpon()
-                      .setMaxVideoHeight(newMaxH)
-                      .build()
-                  
-                  b.btnQuality.text = if (newMaxH == Int.MAX_VALUE) "Качество: Auto" else "Лимит: ${newMaxH}p"
-                  showControls()
-              }
-
               private fun switchChannel(dir: Int) {
                   val ni = currentIndex + dir
                   if (ni in urls.indices) { currentIndex = ni; startPlayback() }
@@ -2119,7 +2103,7 @@ jobs:
                   if (nextIndex in urls.indices) {
                       val nextUrl = urls[nextIndex]
                       if (StreamCache.get(this, nextUrl) == null) {
-                          lifecycleScope.launch(Dispatchers.IO) {
+                        lifecycleScope.launch(Dispatchers.IO) {
                               val resolved = StreamResolver.resolve(nextUrl)
                               if (!resolved.startsWith("ERROR")) {
                                   StreamCache.put(this@PlayerActivity, nextUrl, resolved)
@@ -2166,7 +2150,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "chore: auto-bump versionCode to $RUN_NUMBER & fix quality picker api" || echo "no changes to commit"
+          git commit -m "chore: auto-bump versionCode to $RUN_NUMBER & make quality mode robust" || echo "no changes to commit"
           git pull --rebase origin main || echo "rebase skipped"
           git push origin main || echo "push failed"
 
@@ -2194,11 +2178,10 @@ jobs:
           name: TV Player v${{ github.run_number }}
           body: |
             ## Сборка #${{ github.run_number }}
-            ✨ Финальная сборка со всеми улучшениями:
+            ✨ Финальная стабильная сборка:
             - Пул DoH с карантином и оверлеем DNS.
             - Фоновый Prefetch и Watchdog с индикатором реконнекта.
-            - Лимит качества видео (Quality Picker).
-            - Режим сна (4 часа) и оптимизация размера APK.
+            - Режим сна (4 часа) и оптимизированный размер APK.
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
 
