@@ -24,16 +24,7 @@ object CrashLogger {
             log("CRASH", throwable.stackTraceToString())
             defaultHandler?.uncaughtException(thread, throwable)
         }
-        val appVersion = try { BuildConfig.VERSION_CODE.toString() } catch (_: Exception) { "?" }
-        val device = "${Build.MANUFACTURER} ${Build.MODEL}"
-        val android = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
-        val channel = try { BuildConfig.GITHUB_REPO } catch (_: Exception) { "?" }
         log("INIT", "═══ App started ═══")
-        log("INIT", "Version: v$appVersion")
-        log("INIT", "Device: $device")
-        log("INIT", "Android: $android")
-        log("INIT", "yt-dlp updated at build time")
-        log("INIT", "Repo: $channel")
     }
 
     @Synchronized
@@ -48,8 +39,7 @@ object CrashLogger {
                 val trimmed = if (firstNewline > 0) content.substring(firstNewline + 1) else content
                 file.writeText(trimmed)
             }
-            val timestamp = dateFormat.format(Date())
-            file.appendText("[$timestamp] [$tag] $message\n")
+            file.appendText("[${dateFormat.format(Date())}] [$tag] $message\n")
         } catch (_: Exception) {}
     }
 
@@ -58,27 +48,15 @@ object CrashLogger {
         log(tag, "❌ $message")
         throwable?.let { log(tag, it.stackTraceToString()) }
     }
-    fun readAll(context: Context): String {
-        return try {
-            val file = File(context.filesDir, LOG_FILE)
-            if (file.exists()) file.readText() else "Лог пуст"
-        } catch (e: Exception) { "Не удалось прочитать лог: ${e.message}" }
-    }
-    fun clear(context: Context) {
-        try { File(context.filesDir, LOG_FILE).delete() } catch (_: Exception) {}
-    }
+    fun readAll(context: Context): String = try { File(context.filesDir, LOG_FILE).takeIf { it.exists() }?.readText() ?: "Пусто" } catch (_: Exception) { "Ошибка чтения" }
+    fun clear(context: Context) { try { File(context.filesDir, LOG_FILE).delete() } catch (_: Exception) {} }
     fun share(context: Context) {
         try {
             val file = File(context.filesDir, LOG_FILE)
             if (!file.exists()) return
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "TV Player — лог")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             context.startActivity(Intent.createChooser(intent, "Отправить лог"))
-        } catch (e: Exception) { log("SHARE", "Не удалось отправить лог: ${e.message}") }
+        } catch (_: Exception) {}
     }
 }
