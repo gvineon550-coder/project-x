@@ -58,8 +58,8 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    override fun onCreate(s: Bundle?) {
-        super.onCreate(s)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
         b = ActivityPlayerBinding.inflate(layoutInflater); setContentView(b.root)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).let {

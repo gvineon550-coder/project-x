@@ -30,9 +30,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
         .build()
 
-    override fun onCreate(s: Bundle?) {
+    override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
-        super.onCreate(s)
+        super.onCreate(savedInstanceState)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
 
@@ -40,12 +40,12 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             val now = System.currentTimeMillis()
             if (now - lastRefreshTime > 15000) {
                 lastRefreshTime = now
-                loadFromNetwork(true)
+                loadFromNetwork()
             } else {
                 Toast.makeText(this, "Подождите перед повторным обновлением", Toast.LENGTH_SHORT).show()
             }
         }
-        b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(false) }
+        b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView() }
         b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
 
@@ -60,18 +60,18 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private fun loadInitial() {
         val cached = ChannelCache.load(this)
-        if (!cached.isNullOrEmpty()) { allChannels = cached; updateView(true); if (!ChannelCache.isFresh(this)) loadFromNetwork(false) }
-        else { b.progress.visibility = View.VISIBLE; loadFromNetwork(false) }
+        if (!cached.isNullOrEmpty()) { allChannels = cached; updateView(); if (!ChannelCache.isFresh(this)) loadFromNetwork() }
+        else { b.progress.visibility = View.VISIBLE; loadFromNetwork() }
     }
 
-    private fun loadFromNetwork(force: Boolean) {
+    private fun loadFromNetwork() {
         if (!NetworkUtils.isOnline(this)) { if (allChannels.isEmpty()) { b.progress.visibility = View.GONE; b.error.text = "Нет интернета"; b.error.visibility = View.VISIBLE }; return }
         lifecycleScope.launch {
             try {
                 val (manual, cat) = readConfig()
                 val fresh = loadChannels(this@MainActivity, cat, manual)
                 b.progress.visibility = View.GONE
-                if (fresh.isNotEmpty()) { allChannels = fresh; ChannelCache.save(this@MainActivity, fresh); updateView(force) }
+                if (fresh.isNotEmpty()) { allChannels = fresh; ChannelCache.save(this@MainActivity, fresh); updateView() }
             } catch (_: Exception) { b.progress.visibility = View.GONE }
         }
     }
@@ -92,7 +92,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
-    private fun updateView(scrollToLast: Boolean) {
+    private fun updateView() {
         if (allChannels.isEmpty()) return
         b.progress.visibility = View.GONE; b.error.visibility = View.GONE
         val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
@@ -106,7 +106,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }, { ch ->
             val cur = prefs.getStringSet("favorites", emptySet())?.toMutableSet() ?: mutableSetOf()
             if (cur.contains(ch.url)) cur.remove(ch.url) else cur.add(ch.url)
-            prefs.edit().putStringSet("favorites", cur).apply(); updateView(false)
+            prefs.edit().putStringSet("favorites", cur).apply(); updateView()
         })
     }
 

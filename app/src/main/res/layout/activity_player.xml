@@ -158,7 +158,7 @@
         android:background="@drawable/button_focus_bg"
         android:paddingHorizontal="20dp"
         android:paddingVertical="10dp"
-        text="🔄 Переподключение к потоку..."
+        android:text="🔄 Переподключение к потоку..."
         android:textColor="#FFEB3B"
         android:textSize="16sp"
         android:textStyle="bold"
