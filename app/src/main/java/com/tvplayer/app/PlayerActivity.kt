@@ -73,7 +73,10 @@ class PlayerActivity : AppCompatActivity() {
         startPlayback()
         b.btnBack.setOnClickListener { finish() }
         b.btnSleepTimer.setOnClickListener { toggleSleepTimer() }
-        b.btnQuality.setOnClickListener { cycleQuality() }
+        b.btnQuality.setOnClickListener { 
+            b.btnQuality.text = "Качество: Auto (HLS)"
+            showControls()
+        }
 
         resetInactivityTimer()
         handler.postDelayed(watchdogRunnable, 10000)
@@ -111,25 +114,6 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun cycleQuality() {
-        val p = player ?: return
-        val currentParams = p.trackSelectionParameters
-        val currentMaxH = currentParams.maxVideoHeight
-        
-        val newMaxH = when (currentMaxH) {
-            Int.MAX_VALUE -> 720
-            720 -> 480
-            else -> Int.MAX_VALUE
-        }
-        
-        p.trackSelectionParameters = currentParams.buildUpon()
-            .setMaxVideoHeight(newMaxH)
-            .build()
-        
-        b.btnQuality.text = if (newMaxH == Int.MAX_VALUE) "Качество: Auto" else "Лимит: ${newMaxH}p"
-        showControls()
-    }
-
     private fun switchChannel(dir: Int) {
         val ni = currentIndex + dir
         if (ni in urls.indices) { currentIndex = ni; startPlayback() }
@@ -162,7 +146,7 @@ class PlayerActivity : AppCompatActivity() {
         if (nextIndex in urls.indices) {
             val nextUrl = urls[nextIndex]
             if (StreamCache.get(this, nextUrl) == null) {
-                lifecycleScope.launch(Dispatchers.IO) {
+              lifecycleScope.launch(Dispatchers.IO) {
                     val resolved = StreamResolver.resolve(nextUrl)
                     if (!resolved.startsWith("ERROR")) {
                         StreamCache.put(this@PlayerActivity, nextUrl, resolved)
