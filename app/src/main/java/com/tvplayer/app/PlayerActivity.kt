@@ -11,7 +11,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -114,25 +113,20 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun cycleQuality() {
         val p = player ?: return
-        val mappedTracks = p.currentTracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_VIDEO }
-        if (mappedTracks.isEmpty()) return
-        val trackGroup = mappedTracks[0].mediaTrackGroup
-        val formatsCount = trackGroup.length
-        if (formatsCount <= 1) return
-
         val currentParams = p.trackSelectionParameters
-        val hasOverride = currentParams.overrideForType(androidx.media3.common.C.TRACK_TYPE_VIDEO) != null
+        val currentMaxH = currentParams.maxVideoHeight
         
-        if (!hasOverride) {
-            // Переключаем на первое фиксированное качество (например, индекс 0)
-            val override = TrackSelectionOverride(trackGroup, listOf(0))
-            p.trackSelectionParameters = currentParams.buildUpon().setOverrideForType(override).build()
-            b.btnQuality.text = "Качество: ${trackGroup.getFormat(0).height}p"
-        } else {
-            // Сбрасываем на Auto
-            p.trackSelectionParameters = currentParams.buildUpon().clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_VIDEO).build()
-            b.btnQuality.text = "Качество: Auto"
+        val newMaxH = when (currentMaxH) {
+            Int.MAX_VALUE -> 720
+            720 -> 480
+            else -> Int.MAX_VALUE
         }
+        
+        p.trackSelectionParameters = currentParams.buildUpon()
+            .setMaxVideoHeight(newMaxH)
+            .build()
+        
+        b.btnQuality.text = if (newMaxH == Int.MAX_VALUE) "Качество: Auto" else "Лимит: ${newMaxH}p"
         showControls()
     }
 
