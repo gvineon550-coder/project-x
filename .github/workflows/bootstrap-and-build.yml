@@ -2854,7 +2854,11 @@ jobs:
           EOF
 
       # ---------------------------------------------------------------------
-      # PlayerActivity (без изменений по сравнению с прошлой версией) + коммит
+      # PlayerActivity + коммит
+      # ИЗМЕНЕНИЯ:
+      # - retryCount больше не сбрасывается в startPlayback() (был бесконечный retry)
+      # - retryCount сбрасывается при смене канала (switchChannel / выбор из панели)
+      # - в сообщение коммита добавлен [skip ci] — чтобы push не триггерил workflow снова
       # ---------------------------------------------------------------------
       - name: "🎬 PlayerActivity + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -3078,7 +3082,7 @@ jobs:
                   b.channelListRecycler.layoutManager = LinearLayoutManager(this)
                   b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
                       val idx = urls.indexOf(ch.url)
-                      if (idx >= 0) { currentIndex = idx; startPlayback() }
+                      if (idx >= 0) { currentIndex = idx; retryCount = 0; startPlayback() }
                       b.channelListPanel.visibility = View.GONE
                   }
                   b.channelListRecycler.scrollToPosition(currentIndex)
@@ -3087,7 +3091,7 @@ jobs:
 
               private fun switchChannel(direction: Int) {
                   val newIndex = currentIndex + direction
-                  if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() }
+                  if (newIndex in urls.indices) { currentIndex = newIndex; retryCount = 0; startPlayback() }
               }
 
               private fun startPlayback() {
@@ -3100,7 +3104,6 @@ jobs:
                   handler.removeCallbacks(hideChannelOverlayRunnable)
                   handler.postDelayed(hideChannelOverlayRunnable, 3000)
                   b.errorLayout.visibility = View.GONE
-                  retryCount = 0
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
                   if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
@@ -3268,7 +3271,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
-          git commit -m "feat: DoH toggle (Kotlin+Python+Coil) + diagnostics + risk mitigations" || echo "no changes"
+          git commit -m "chore: build #${{ github.run_number }} [skip ci]" || { echo "no changes"; exit 0; }
           git push || echo "push failed"
 
       - name: "🔨 Build APK"
