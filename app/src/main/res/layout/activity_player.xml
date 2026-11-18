@@ -132,38 +132,6 @@
         android:focusable="true"
         android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/btnDnsStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="76dp"
-        android:background="@drawable/button_focus_bg"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="6dp"
-        android:text="DNS: AdGuard"
-        android:textColor="#4ADE80"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:clickable="false"
-        android:focusable="false"
-        android:visibility="gone" />
-
-    <TextView
-        android:id="@+id/txtReconnectStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_marginTop="120dp"
-        android:background="@drawable/button_focus_bg"
-        android:paddingHorizontal="20dp"
-        android:paddingVertical="10dp"
-        android:text="🔄 Переподключение к потоку..."
-        android:textColor="#FFEB3B"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
-
     <LinearLayout
         android:id="@+id/rightControls"
         android:layout_width="wrap_content"
@@ -179,7 +147,7 @@
             android:background="@drawable/button_focus_bg"
             android:paddingHorizontal="16dp"
             android:paddingVertical="8dp"
-            android:text="Качество: Auto"
+            android:text="Auto"
             android:textColor="#FFFFFF"
             android:textSize="16sp"
             android:textStyle="bold"

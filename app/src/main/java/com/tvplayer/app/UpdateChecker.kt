@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 object UpdateChecker {
     data class UpdateInfo(val downloadUrl: String, val versionCode: Int, val changelog: String)
@@ -14,34 +15,73 @@ object UpdateChecker {
         try {
             val repo = BuildConfig.GITHUB_REPO
             if (repo.isBlank() || repo.contains("user/")) return@withContext null
-            val client = OkHttpClient.Builder().dns(DohProvider.createWithFallback(context)).build()
-            client.newCall(Request.Builder().url("https://api.github.com/repos/$repo/releases/latest").header("User-Agent", "TVPlayer").build()).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                val json = JSONObject(resp.body?.string() ?: return@withContext null)
-                val newVersion = json.optString("tag_name").removePrefix("v").toIntOrNull() ?: 0
-                if (newVersion <= BuildConfig.VERSION_CODE) return@withContext null
-                val assets = json.optJSONArray("assets") ?: return@withContext null
-                for (i in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(i)
-                    val url = asset.optString("browser_download_url")
-                    if (url.endsWith(".apk", ignoreCase = true)) {
-                        return@withContext UpdateInfo(url, newVersion, json.optString("body", ""))
-                    }
+            CrashLogger.info("OTA", "→ Проверка (repo=$repo, текущая v${BuildConfig.VERSION_CODE})")
+            val url = "https://api.github.com/repos/$repo/releases/latest"
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .dns(DohProvider.createWithFallback(context))
+                .build()
+            val req = Request.Builder().url(url)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "TVPlayer").build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    CrashLogger.error("OTA", "GitHub API вернул HTTP ${resp.code}")
+                    return@withContext null
                 }
-                null
+                val body = resp.body?.string() ?: return@withContext null
+                val json = JSONObject(body)
+                val tag = json.optString("tag_name").removePrefix("v")
+                val newVersion = tag.toIntOrNull() ?: 0
+                if (newVersion <= BuildConfig.VERSION_CODE) {
+                    CrashLogger.info("OTA", "✓ Последняя версия (v${BuildConfig.VERSION_CODE})")
+                    return@withContext null
+                }
+                val assets = json.optJSONArray("assets") ?: return@withContext null
+                if (assets.length() == 0) return@withContext null
+                val apkUrl = assets.getJSONObject(0).optString("browser_download_url")
+                if (apkUrl.isBlank()) return@withContext null
+                CrashLogger.info("OTA", "🎉 Доступно v$newVersion")
+                UpdateInfo(apkUrl, newVersion, json.optString("body", "Новая версия"))
             }
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            CrashLogger.error("OTA", "Ошибка проверки", e)
+            null
+        }
     }
 
     suspend fun downloadApk(context: Context, url: String): File? = withContext(Dispatchers.IO) {
         try {
-            val client = OkHttpClient.Builder().dns(DohProvider.createWithFallback(context)).build()
-            client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
+            CrashLogger.info("OTA", "→ Скачивание APK")
+            val client = OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .dns(DohProvider.createWithFallback(context))
+                .build()
+            val req = Request.Builder().url(url).build()
+            val started = System.currentTimeMillis()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    CrashLogger.error("OTA", "Скачивание провалено: HTTP ${resp.code}")
+                    return@withContext null
+                }
                 val file = File(context.cacheDir, "update.apk")
-                resp.body?.byteStream()?.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+                resp.body?.byteStream()?.use { input ->
+                    file.outputStream().use { output -> input.copyTo(output) }
+                }
+                val elapsed = System.currentTimeMillis() - started
+                val sizeMb = file.length() / 1024 / 1024
+                val speedKbps = if (elapsed > 0) (file.length() / 1024) * 1000 / elapsed else 0
+                CrashLogger.info("OTA", "✓ APK скачан: ${sizeMb} МБ за ${elapsed/1000}с (${speedKbps} КБ/с)")
+                if (speedKbps < 200) {
+                    CrashLogger.info("OTA", "⚠️ Медленная загрузка — возможен троттлинг AdGuard DoH")
+                }
                 file
             }
-        } catch (_: Exception) { null }
+        } catch (e: Exception) {
+            CrashLogger.error("OTA", "Ошибка скачивания", e)
+            null
+        }
     }
 }
