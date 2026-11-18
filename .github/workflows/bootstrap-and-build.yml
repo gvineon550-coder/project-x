@@ -32,7 +32,7 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -60,7 +60,6 @@ jobs:
           pip install --quiet dnspython==2.6.1 yt-dlp
           python3 - << 'PYEOF'
           import sys
-          # Проверка конфликта зависимостей (риск №3 из списка)
           try:
               import yt_dlp
               import dns.message
@@ -102,9 +101,6 @@ jobs:
 
       # ---------------------------------------------------------------------
       # BUILD.GRADLE + ресурсы + layout
-      # - defensive reset chaquopy (защита от битого файла из прошлого прогона)
-      # - dnspython==2.6.1 (фиксированная версия, риск №3)
-      # - activity_settings.xml с тумблером btnToggleDoh
       # ---------------------------------------------------------------------
       - name: "📦 Манифест, иконки, сплэш, фоны, layout"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -137,7 +133,6 @@ jobs:
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")',
                   'implementation("com.squareup.okhttp3:okhttp:4.12.0")\n' + "\n".join(deps)
               )
-          # Defensive reset chaquopy — фиксированная версия dnspython
           chaquopy_match = re.search(r'^chaquopy\s*\{', txt, re.MULTILINE)
           if chaquopy_match:
               start = chaquopy_match.start()
@@ -278,8 +273,6 @@ jobs:
                       android:screenOrientation="unspecified" />
                   <activity android:name=".PlayerActivity" android:exported="false"
                       android:screenOrientation="sensorLandscape" />
-                  <service android:name=".PlaybackService" android:exported="false"
-                      android:foregroundServiceType="mediaPlayback" />
                   <provider
                       android:name="androidx.core.content.FileProvider"
                       android:authorities="${applicationId}.fileprovider"
@@ -475,8 +468,8 @@ jobs:
                       android:id="@+id/btnFavFilter"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="★ Избранное"
-                      android:textColor="#FFEB3B"
+                      android:text="☆ Избранное"
+                      android:textColor="#FF8A8D93"
                       android:textSize="16sp"
                       android:textStyle="bold"
                       android:padding="12dp"
@@ -555,10 +548,6 @@ jobs:
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
-          # =====================================================================
-          # activity_settings.xml — ДОБАВЛЕН тумблер btnToggleDoh
-          # в карточку «🛡 ЗАЩИТА DNS» между описанием и txtDohResult
-          # =====================================================================
           cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <androidx.constraintlayout.widget.ConstraintLayout
@@ -1093,10 +1082,6 @@ jobs:
 
       # ---------------------------------------------------------------------
       # PYTHON RESOLVER
-      # - set_doh_enabled() с очисткой кэша (гарантированное выключение)
-      # - счётчики doh_resolved / system_fallback / slow_count
-      # - DOH_SLOW_THRESHOLD=1.2с (риск №4 — circuit breaker на медленный DoH)
-      # - DOH_TIMEOUT=1.5с
       # ---------------------------------------------------------------------
       - name: "🐍 Python (DoH с счётчиками и slow-trigger breaker)"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -1182,6 +1167,8 @@ jobs:
                           _doh_slow_count += 1
                           if _doh_slow_count >= 3:
                               _doh_fail_until = time.time() + _DOH_COOLDOWN
+                              _doh_slow_count = 0
+                              _doh_consecutive_fails = 0
                       else:
                           _doh_slow_count = 0
                       if not ips:
@@ -1275,12 +1262,10 @@ jobs:
           EOF
 
       # ---------------------------------------------------------------------
-      # CrashLogger + TVPlayerApp + UpdateDialog + НОВЫЙ DohSettings
-      # - TVPlayerApp: 3 ретрая set_doh_enabled + проверка doh_health().enabled
-      # - pre-flight только если DoH включён
-      # - DohSettings: новый файл, хранит флаг в SharedPreferences
+      # Core utils: CrashLogger, DohSettings, BaseActivity, CacheManager,
+      # ThumbCache, TVPlayerApp, UpdateDialog
       # ---------------------------------------------------------------------
-      - name: "📝 CrashLogger + TVPlayerApp + UpdateDialog + DohSettings"
+      - name: "📝 Core utils (CrashLogger, Base, Cache, Thumb, App)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/CrashLogger.kt << 'EOF'
@@ -1370,7 +1355,6 @@ jobs:
           }
           EOF
 
-          # НОВЫЙ ФАЙЛ: DohSettings — единая точка правды для флага
           cat > app/src/main/java/com/tvplayer/app/DohSettings.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
@@ -1392,20 +1376,212 @@ jobs:
           }
           EOF
 
-          # TVPlayerApp: при старте синхронизирует Python-флаг с prefs (3 ретрая)
+          cat > app/src/main/java/com/tvplayer/app/ThumbCache.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+
+          object ThumbCache {
+              private const val PREFS = "thumb_cache"
+              private const val MAX_ENTRIES = 50
+
+              fun get(context: Context, url: String): String? =
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(url, null)
+
+              fun put(context: Context, url: String, thumb: String) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val editor = prefs.edit()
+                  if (prefs.all.size >= MAX_ENTRIES) {
+                      val toRemove = prefs.all.keys.take(prefs.all.size - MAX_ENTRIES + 1)
+                      toRemove.forEach { editor.remove(it) }
+                  }
+                  editor.putString(url, thumb).apply()
+                  CrashLogger.info("ThumbCache", "Сохранено: ${url.takeLast(30)}")
+              }
+
+              fun evictIfNeeded(context: Context) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  if (prefs.all.size <= MAX_ENTRIES) return
+                  val editor = prefs.edit()
+                  prefs.all.keys.take(prefs.all.size - MAX_ENTRIES).forEach { editor.remove(it) }
+                  editor.apply()
+                  CrashLogger.info("ThumbCache", "Эвикция до $MAX_ENTRIES записей")
+              }
+
+              fun clear(context: Context) {
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/BaseActivity.kt << 'EOF'
+          package com.tvplayer.app
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import androidx.appcompat.app.AppCompatActivity
+
+          open class BaseActivity : AppCompatActivity() {
+              private val inactivityHandler = Handler(Looper.getMainLooper())
+              private var inactivityRunnable: Runnable? = null
+
+              companion object {
+                  const val INACTIVITY_TIMEOUT_MS = 4 * 60 * 60 * 1000L
+              }
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  resetInactivityTimer()
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  resetInactivityTimer()
+                  CacheManager.maybeCleanup(this)
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  inactivityRunnable?.let { inactivityHandler.removeCallbacks(it) }
+                  inactivityRunnable = null
+              }
+
+              override fun onUserInteraction() {
+                  super.onUserInteraction()
+                  resetInactivityTimer()
+              }
+
+              private fun resetInactivityTimer() {
+                  inactivityRunnable?.let { inactivityHandler.removeCallbacks(it) }
+                  inactivityRunnable = Runnable {
+                      CrashLogger.info("Lifecycle", "Автовыключение: 4ч без активности")
+                      exitApp()
+                  }
+                  inactivityHandler.postDelayed(inactivityRunnable!!, INACTIVITY_TIMEOUT_MS)
+              }
+
+              override fun onDestroy() {
+                  inactivityRunnable?.let { inactivityHandler.removeCallbacks(it) }
+                  super.onDestroy()
+              }
+
+              protected open fun exitApp() {
+                  finishAffinity()
+                  android.os.Process.killProcess(android.os.Process.myPid())
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/tvplayer/app/CacheManager.kt << 'EOF'
+          package com.tvplayer.app
+          import android.content.Context
+          import android.os.StatFs
+          import java.io.File
+
+          object CacheManager {
+              private const val PREFS = "cache_manager"
+              private const val KEY_LAST_CLEANUP = "last_cleanup"
+              private const val MIN_INTERVAL_MS = 6 * 60 * 60 * 1000L
+
+              fun maybeCleanup(context: Context) {
+                  val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                  val last = prefs.getLong(KEY_LAST_CLEANUP, 0L)
+                  val now = System.currentTimeMillis()
+                  if (now - last < MIN_INTERVAL_MS) return
+                  prefs.edit().putLong(KEY_LAST_CLEANUP, now).apply()
+                  Thread { performCleanup(context.applicationContext) }
+                      .apply { name = "CacheCleanup"; isDaemon = true }.start()
+              }
+
+              private fun performCleanup(context: Context) {
+                  try {
+                      val updateApk = File(context.cacheDir, "update.apk")
+                      if (updateApk.exists()) {
+                          val sizeMb = updateApk.length() / 1024 / 1024
+                          updateApk.delete()
+                          CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
+                      }
+
+                      StreamCache.cleanup(context)
+                      ThumbCache.evictIfNeeded(context)
+
+                      val sevenDays = 7L * 24 * 60 * 60 * 1000
+                      val now = System.currentTimeMillis()
+                      var oldRemoved = 0
+                      var oldBytes = 0L
+                      context.cacheDir.listFiles()?.forEach { f ->
+                          if (f.isFile && (now - f.lastModified()) > sevenDays) {
+                              oldBytes += f.length()
+                              if (f.delete()) oldRemoved++
+                          } else if (f.isDirectory) {
+                              f.listFiles()?.forEach { inner ->
+                                  if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
+                                      oldBytes += inner.length()
+                                      if (inner.delete()) oldRemoved++
+                                  }
+                              }
+                          }
+                      }
+                      if (oldRemoved > 0) {
+                          CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
+                      }
+
+                      var cacheSize = 0L
+                      context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
+                      if (cacheSize > 15 * 1024 * 1024) {
+                          val mb = cacheSize / 1024 / 1024
+                          context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                          CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
+                          cacheSize = 0L
+                      }
+
+                      var filesSize = 0L
+                      context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      val filesMb = filesSize / 1024 / 1024
+                      if (filesSize > 50 * 1024 * 1024) {
+                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
+                          ChannelCache.clear(context)
+                          CrashLogger.clear(context)
+                          filesSize = 0L
+                          context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
+                      } else if (filesSize > 30 * 1024 * 1024) {
+                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
+                      }
+
+                      val stat = StatFs(context.filesDir.path)
+                      val freeMb = stat.availableBytes / 1024 / 1024
+                      if (freeMb < 100) {
+                          CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
+                      }
+
+                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
+                  } catch (e: Exception) {
+                      CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
+                  }
+              }
+          }
+          EOF
+
           cat > app/src/main/java/com/tvplayer/app/TVPlayerApp.kt << 'EOF'
           package com.tvplayer.app
           import com.chaquo.python.Python
           import com.chaquo.python.android.PyApplication
+          import java.util.UUID
 
           class TVPlayerApp : PyApplication() {
               override fun onCreate() {
                   super.onCreate()
                   CrashLogger.init(this)
+
+                  val prefs = getSharedPreferences("tvplayer", MODE_PRIVATE)
+                  if (!prefs.contains("vk_from_id")) {
+                      val newId = UUID.randomUUID().toString()
+                      prefs.edit().putString("vk_from_id", newId).apply()
+                      CrashLogger.info("VkApi", "Сгенерирован X-From-Id: $newId")
+                  }
+
                   Thread {
                       val desired = DohSettings.isEnabled(this)
 
-                      // Синхронизация Python-флага с ретраями и проверкой
                       var synced = false
                       for (attempt in 0 until 3) {
                           try {
@@ -1473,13 +1649,7 @@ jobs:
           EOF
 
       # ---------------------------------------------------------------------
-      # DOH PROVIDER
-      # - createWithFallback БЕЗ раннего return (включение/выключение работает динамически)
-      # - invalidate() — сброс кэша клиента
-      # - testDoh пропускается при выключке
-      # - TEST_DOMAIN = wikipedia.org (не блокируется AdGuard)
-      # - isSuspiciousIp() — детект блок-страниц (риск №2)
-      # - runFullDiagnostics() — отчёт с галочками для UI
+      # DOH PROVIDER (с callTimeout в диагностике)
       # ---------------------------------------------------------------------
       - name: "🌐 DoH Provider (синглтон + диагностика)"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -1495,6 +1665,7 @@ jobs:
           import java.io.File
           import java.net.InetAddress
           import java.net.UnknownHostException
+          import java.util.concurrent.TimeUnit
 
           object DohProvider {
               private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
@@ -1503,10 +1674,6 @@ jobs:
               @Volatile private var cached: Dns? = null
               @Volatile private var cachedContext: Context? = null
 
-              // ВАЖНО: НЕ возвращаем Dns.SYSTEM напрямую при выключке.
-              // Возвращаем обёртку, которая смотрит на флаг на каждом lookup().
-              // Это позволяет переключать тумблер в обе стороны без перезапуска
-              // — в том числе для уже созданных клиентов (Coil, OkHttp пулы).
               fun createWithFallback(context: Context): Dns {
                   val appCtx = context.applicationContext
                   cached?.let { if (cachedContext === appCtx) return it }
@@ -1570,7 +1737,9 @@ jobs:
                       return false
                   }
                   return try {
-                      val client = OkHttpClient.Builder().build()
+                      val client = OkHttpClient.Builder()
+                          .callTimeout(5, TimeUnit.SECONDS)
+                          .build()
                       val doh = DnsOverHttps.Builder()
                           .client(client)
                           .url(DOH_URL.toHttpUrl())
@@ -1609,7 +1778,9 @@ jobs:
               private fun tryResolveDoH(host: String): TestResult {
                   val started = System.currentTimeMillis()
                   return try {
-                      val client = OkHttpClient.Builder().build()
+                      val client = OkHttpClient.Builder()
+                          .callTimeout(5, TimeUnit.SECONDS)
+                          .build()
                       val doh = DnsOverHttps.Builder()
                           .client(client)
                           .url(DOH_URL.toHttpUrl())
@@ -1743,8 +1914,9 @@ jobs:
           EOF
 
       # ---------------------------------------------------------------------
-      # Kotlin Core (без изменений по сравнению с прошлой версией, кроме UpdateChecker)
-      # UpdateChecker: добавлен лог скорости OTA (риск №5)
+      # Kotlin Core: VkApi (стабильный X-From-Id), ChannelCache (24h/48h),
+      # NetworkUtils, StreamResolver, StreamCache (4h), ChannelAdapter (INEXACT),
+      # ChannelListAdapter, UpdateChecker
       # ---------------------------------------------------------------------
       - name: "🧠 Kotlin Core"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -1756,7 +1928,6 @@ jobs:
           import okhttp3.OkHttpClient
           import okhttp3.Request
           import org.json.JSONObject
-          import java.util.UUID
           import java.util.concurrent.TimeUnit
 
           data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
@@ -1774,14 +1945,21 @@ jobs:
           suspend fun loadChannels(context: android.content.Context, categoryId: String, manual: List<Channel>): List<Channel> =
               withContext(Dispatchers.IO) {
                   val result = mutableListOf<Channel>()
+                  if (categoryId.isBlank()) {
+                      CrashLogger.info("VkApi", "categoryId пустой — только manual (${manual.size})")
+                      return@withContext manual
+                  }
                   val startTime = System.currentTimeMillis()
                   CrashLogger.info("VkApi", "→ Загрузка каналов, category=$categoryId")
                   try {
+                      val fromId = context.getSharedPreferences("tvplayer", android.content.Context.MODE_PRIVATE)
+                          .getString("vk_from_id", null)
+                          ?: java.util.UUID.randomUUID().toString()
                       val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
                       val req = Request.Builder().url(url)
                           .header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
                           .header("Origin", "https://live.vkvideo.ru").header("Referer", "https://live.vkvideo.ru/")
-                          .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
+                          .header("X-App", "streams_web").header("X-From-Id", fromId).build()
                       buildClient(context).newCall(req).execute().use { resp ->
                           val body = resp.body?.string().orEmpty()
                           CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер: ${body.length} байт")
@@ -1819,8 +1997,8 @@ jobs:
 
           object ChannelCache {
               private const val FILE_NAME = "channels_cache.json"
-              private const val FRESH_TTL_MS = 6 * 60 * 60 * 1000L
-              private const val EXPIRE_TTL_MS = 24 * 60 * 60 * 1000L
+              private const val FRESH_TTL_MS = 24 * 60 * 60 * 1000L
+              private const val EXPIRE_TTL_MS = 48 * 60 * 60 * 1000L
 
               fun save(context: Context, channels: List<Channel>) {
                   try {
@@ -1850,7 +2028,7 @@ jobs:
                       val root = JSONObject(file.readText())
                       val ts = root.optLong("timestamp", 0L)
                       if (System.currentTimeMillis() - ts > EXPIRE_TTL_MS) {
-                          CrashLogger.info("ChannelCache", "Кэш устарел (>24ч)")
+                          CrashLogger.info("ChannelCache", "Кэш устарел (>48ч)")
                           return null
                       }
                       val arr = root.optJSONArray("channels") ?: return null
@@ -1939,7 +2117,7 @@ jobs:
 
           object StreamCache {
               private const val PREFS = "stream_cache"
-              private const val TTL_MS = 2 * 60 * 60 * 1000L
+              private const val TTL_MS = 4 * 60 * 60 * 1000L
               private const val MAX_ENTRIES = 200
 
               fun get(context: Context, channelUrl: String): String? {
@@ -2024,6 +2202,7 @@ jobs:
           import android.widget.TextView
           import androidx.recyclerview.widget.RecyclerView
           import coil.load
+          import coil.size.Precision
           class ChannelAdapter(
               private val items: List<Channel>,
               private val onClick: (Channel) -> Unit,
@@ -2041,7 +2220,13 @@ jobs:
                   h.txtNumber.text = (pos + 1).toString()
                   h.name.text = ch.name
                   if (ch.logo.isNotBlank()) {
-                      h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+                      h.logo.load(ch.logo) {
+                          crossfade(true)
+                          size(120, 120)
+                          precision(Precision.INEXACT)
+                          placeholder(android.R.color.darker_gray)
+                          error(android.R.color.darker_gray)
+                      }
                   } else {
                       h.logo.load(null); h.logo.setImageDrawable(null)
                   }
@@ -2071,7 +2256,6 @@ jobs:
           }
           EOF
 
-          # UpdateChecker — добавлен лог скорости OTA (риск №5)
           cat > app/src/main/java/com/tvplayer/app/UpdateChecker.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
@@ -2163,7 +2347,8 @@ jobs:
           EOF
 
       # ---------------------------------------------------------------------
-      # MainActivity (без изменений по сравнению с прошлой версией)
+      # MainActivity (extends BaseActivity, ThumbCache, readConfig try/catch,
+      # btnFavFilter fix, progress.VISIBLE)
       # ---------------------------------------------------------------------
       - name: "🧠 MainActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -2175,14 +2360,13 @@ jobs:
           import android.content.ClipboardManager
           import android.content.Context
           import android.content.Intent
+          import android.graphics.Color
           import android.net.Uri
           import android.os.Bundle
-          import android.os.StatFs
           import android.provider.Settings
           import android.view.View
           import android.widget.Toast
           import androidx.activity.OnBackPressedCallback
-          import androidx.appcompat.app.AppCompatActivity
           import androidx.core.content.FileProvider
           import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
           import androidx.lifecycle.lifecycleScope
@@ -2197,7 +2381,7 @@ jobs:
           import java.io.File
           import java.util.concurrent.TimeUnit
 
-          class MainActivity : AppCompatActivity(), ImageLoaderFactory {
+          class MainActivity : BaseActivity(), ImageLoaderFactory {
               private lateinit var b: ActivityMainBinding
               private var allChannels: List<Channel> = emptyList()
               private var showOnlyFavorites = false
@@ -2223,9 +2407,11 @@ jobs:
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
 
-                  performStartupCleanup()
-
-                  b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+                  b.btnRefresh.setOnClickListener {
+                      CrashLogger.info("UI", "Кнопка Обновить")
+                      b.progress.visibility = View.VISIBLE
+                      loadFromNetwork(forceRefresh = true)
+                  }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
                   b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
                   b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
@@ -2269,88 +2455,13 @@ jobs:
                   }
               }
 
-              private fun performStartupCleanup() {
-                  try {
-                      val updateApk = File(cacheDir, "update.apk")
-                      if (updateApk.exists()) {
-                          val sizeMb = updateApk.length() / 1024 / 1024
-                          updateApk.delete()
-                          CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
-                      }
-
-                      StreamCache.cleanup(this)
-
-                      val staleKeys = listOf("last_ota_check", "last_ota_version")
-                      val editor = prefs.edit()
-                      var removedKeys = 0
-                      staleKeys.forEach { k -> if (prefs.contains(k)) { editor.remove(k); removedKeys++ } }
-                      if (removedKeys > 0) {
-                          editor.apply()
-                          CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
-                      }
-
-                      val sevenDays = 7L * 24 * 60 * 60 * 1000
-                      val now = System.currentTimeMillis()
-                      var oldRemoved = 0
-                      var oldBytes = 0L
-                      cacheDir.listFiles()?.forEach { f ->
-                          if (f.isFile && (now - f.lastModified()) > sevenDays) {
-                              oldBytes += f.length()
-                              if (f.delete()) oldRemoved++
-                          } else if (f.isDirectory) {
-                              f.listFiles()?.forEach { inner ->
-                                  if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
-                                      oldBytes += inner.length()
-                                      if (inner.delete()) oldRemoved++
-                                  }
-                              }
-                          }
-                      }
-                      if (oldRemoved > 0) {
-                          CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
-                      }
-
-                      var cacheSize = 0L
-                      cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-                      if (cacheSize > 15 * 1024 * 1024) {
-                          val mb = cacheSize / 1024 / 1024
-                          cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                          CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
-                          cacheSize = 0L
-                      }
-
-                      var filesSize = 0L
-                      filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-                      val filesMb = filesSize / 1024 / 1024
-                      if (filesSize > 50 * 1024 * 1024) {
-                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
-                          ChannelCache.clear(this)
-                          CrashLogger.clear(this)
-                          filesSize = 0L
-                          filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-                      } else if (filesSize > 30 * 1024 * 1024) {
-                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
-                      }
-
-                      val stat = StatFs(filesDir.path)
-                      val freeMb = stat.availableBytes / 1024 / 1024
-                      if (freeMb < 100) {
-                          CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
-                      }
-
-                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
-                  } catch (e: Exception) {
-                      CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
-                  }
-              }
-
               private fun loadInitial() {
                   val cached = ChannelCache.load(this)
                   if (cached != null && cached.isNotEmpty()) {
                       allChannels = cached
                       updateView(scrollToLast = true)
                       if (ChannelCache.isFresh(this)) {
-                          CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем")
+                          CrashLogger.info("MainActivity", "Кэш свежий (<24ч), VK не дёргаем")
                           return
                       }
                       CrashLogger.info("MainActivity", "Кэш устарел — обновление в фоне")
@@ -2365,8 +2476,8 @@ jobs:
               private fun loadFromNetwork(forceRefresh: Boolean) {
                   if (!NetworkUtils.isOnline(this)) {
                       CrashLogger.info("MainActivity", "Нет интернета — отмена")
+                      b.progress.visibility = View.GONE
                       if (allChannels.isEmpty()) {
-                          b.progress.visibility = View.GONE
                           b.recycler.visibility = View.GONE
                           b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
                           b.error.visibility = View.VISIBLE
@@ -2378,11 +2489,23 @@ jobs:
                           val (manual, cat) = readConfig()
                           val manualWithLogos = manual.map { ch ->
                               if (ch.logo.isBlank()) {
-                                  val thumb = StreamResolver.getThumbnail(ch.url)
-                                  if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                                  val cached = ThumbCache.get(this@MainActivity, ch.url)
+                                  if (cached != null) ch.copy(logo = cached)
+                                  else {
+                                      val thumb = StreamResolver.getThumbnail(ch.url)
+                                      if (thumb.isNotBlank()) {
+                                          ThumbCache.put(this@MainActivity, ch.url, thumb)
+                                          ch.copy(logo = thumb)
+                                      } else ch
+                                  }
                               } else ch
                           }
-                          val fresh = loadChannels(this@MainActivity, cat, manualWithLogos)
+                          val fresh = if (cat.isBlank() && manualWithLogos.isNotEmpty()) {
+                              CrashLogger.info("MainActivity", "categoryId пустой — только ручные каналы")
+                              manualWithLogos
+                          } else {
+                              loadChannels(this@MainActivity, cat, manualWithLogos)
+                          }
                           b.progress.visibility = View.GONE
                           if (fresh.isNotEmpty()) {
                               val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
@@ -2447,11 +2570,6 @@ jobs:
                       .show()
               }
 
-              private fun exitApp() {
-                  finishAffinity()
-                  android.os.Process.killProcess(android.os.Process.myPid())
-              }
-
               private fun startUpdateDownload(url: String) {
                   Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
                   lifecycleScope.launch {
@@ -2495,7 +2613,8 @@ jobs:
                   val sorted = allChannels.sortedByDescending { it.isFavorite }
                   val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
                   b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
-                  b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
+                  b.btnFavFilter.text = if (showOnlyFavorites) "★ Избранное" else "☆ Избранное"
+                  b.btnFavFilter.setTextColor(if (showOnlyFavorites) Color.parseColor("#FFEB3B") else Color.parseColor("#FF8A8D93"))
                   b.recycler.visibility = View.VISIBLE
                   b.recycler.adapter = ChannelAdapter(displayed, { ch ->
                       needScrollOnResume = true
@@ -2519,19 +2638,27 @@ jobs:
               }
 
               private fun readConfig(): Pair<List<Channel>, String> {
-                  val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
-                  val o = JSONObject(json); val manual = mutableListOf<Channel>()
-                  o.optJSONArray("channels")?.let { arr -> for (i in 0 until arr.length()) { val c = arr.getJSONObject(i); manual.add(Channel(c.optString("name"), c.optString("url"), c.optString("logo"), c.optString("group", "VK Video"))) } }
-                  val cats = o.optJSONArray("categories")
-                  return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
+                  return try {
+                      val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
+                      val o = JSONObject(json); val manual = mutableListOf<Channel>()
+                      o.optJSONArray("channels")?.let { arr ->
+                          for (i in 0 until arr.length()) {
+                              val c = arr.getJSONObject(i)
+                              manual.add(Channel(c.optString("name"), c.optString("url"), c.optString("logo"), c.optString("group", "VK Video")))
+                          }
+                      }
+                      val cats = o.optJSONArray("categories")
+                      manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
+                  } catch (e: Exception) {
+                      CrashLogger.error("MainActivity", "Ошибка чтения vk_config.json", e)
+                      emptyList<Channel>() to ""
+                  }
               }
           }
           EOF
 
       # ---------------------------------------------------------------------
-      # SettingsActivity — тумблер DoH с полной синхронизацией Kotlin↔Python↔Coil
-      # - toggleDoh(): 3 ретрая Python + откат при неудаче + Coil.reset()
-      # - updateDohToggleUI(): цвет и текст по состоянию
+      # SettingsActivity (extends BaseActivity, exitApp() из Base)
       # ---------------------------------------------------------------------
       - name: "⚙ SettingsActivity (тумблер DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -2548,7 +2675,6 @@ jobs:
           import android.os.Bundle
           import android.provider.Settings
           import android.widget.Toast
-          import androidx.appcompat.app.AppCompatActivity
           import androidx.core.content.FileProvider
           import androidx.lifecycle.lifecycleScope
           import coil.Coil
@@ -2558,14 +2684,14 @@ jobs:
           import kotlinx.coroutines.withContext
           import java.io.File
 
-          class SettingsActivity : AppCompatActivity() {
+          class SettingsActivity : BaseActivity() {
               private lateinit var b: ActivitySettingsBinding
 
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
                   b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
 
-                  b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
+                  b.txtVersion.text = "TV Player v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
                   b.txtAbout.text = """
                       Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
 
@@ -2577,8 +2703,8 @@ jobs:
                       • Переключение пультом вверх/вниз
                       • Панель каналов в плеере (ОК)
                       • Таймер сна (5м – 5ч)
-                      • Ручное обновление (⬇️ в шапке)
-                      • Умное кэширование + автоочистка
+                      • Автовыключение через 4ч без активности
+                      • Умное кэширование + автоочистка (6ч)
                       • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
                       • Тумблер DoH + диагностика
                       • Подробный лог
@@ -2605,6 +2731,7 @@ jobs:
                       imageLoader.memoryCache?.clear()
                       StreamCache.clearAll(this)
                       ChannelCache.clear(this)
+                      ThumbCache.clear(this)
                       cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                       Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
                       updateCacheInfo()
@@ -2638,8 +2765,7 @@ jobs:
 
                   b.btnExitApp.setOnClickListener {
                       CrashLogger.info("Settings", "Полный выход")
-                      finishAffinity()
-                      android.os.Process.killProcess(android.os.Process.myPid())
+                      exitApp()
                   }
               }
 
@@ -2661,16 +2787,9 @@ jobs:
                   b.btnToggleDoh.setTextColor(Color.parseColor("#FF8A8D93"))
 
                   lifecycleScope.launch {
-                      // 1) Kotlin-флаг — сохраняем сразу. Все новые lookup() увидят его мгновенно,
-                      //    т.к. createWithFallback всегда возвращает обёртку, а обёртка смотрит на флаг.
                       DohSettings.setEnabled(this@SettingsActivity, newState)
-
-                      // 2) Python-флаг с ретраями + проверка через doh_health().enabled
                       val pyOk = withContext(Dispatchers.IO) { syncPythonDohFlag(newState) }
 
-                      // 3) Coil: ImageLoader уже создан и держит OkHttpClient с обёрткой.
-                      //    Обёртка смотрит на флаг динамически — это само по себе достаточно.
-                      //    Но для чистоты пересоздаём ImageLoader на случай кэшей внутри клиента.
                       try {
                           Coil.reset()
                           CrashLogger.info("DoH", "Coil.reset() — ImageLoader пересоздан с новым состоянием")
@@ -2678,10 +2797,9 @@ jobs:
                           CrashLogger.error("DoH", "Coil.reset() не удался", e)
                       }
 
-                      // 4) Откат при неудаче Python-синхронизации (чтобы Kotlin и Python не разъехались)
                       if (!pyOk) {
                           DohSettings.setEnabled(this@SettingsActivity, !newState)
-                          if (!newState) DohProvider.invalidate()  // был выключен — включаем обратно
+                          if (!newState) DohProvider.invalidate()
                           try { Coil.reset() } catch (_: Exception) {}
                           updateDohToggleUI()
                           Toast.makeText(
@@ -2747,12 +2865,12 @@ jobs:
                       getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
                       getSharedPreferences("doh_settings", MODE_PRIVATE).edit().clear().apply()
                       ChannelCache.clear(this)
+                      ThumbCache.clear(this)
                       CrashLogger.clear(this)
                       val il = Coil.imageLoader(this)
                       il.diskCache?.clear()
                       il.memoryCache?.clear()
                       cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                      // Сбросили prefs → DoH вернулся в default (true)
                       DohProvider.invalidate()
                       try { Coil.reset() } catch (_: Exception) {}
                       lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }
@@ -2854,11 +2972,9 @@ jobs:
           EOF
 
       # ---------------------------------------------------------------------
-      # PlayerActivity + коммит
-      # ИЗМЕНЕНИЯ:
-      # - retryCount больше не сбрасывается в startPlayback() (был бесконечный retry)
-      # - retryCount сбрасывается при смене канала (switchChannel / выбор из панели)
-      # - в сообщение коммита добавлен [skip ci] — чтобы push не триггерил workflow снова
+      # PlayerActivity (extends BaseActivity, stall checker, exponential backoff,
+      # shouldRetry, onPause/onResume, onUserInteraction в dispatchKeyEvent,
+      # override exitApp) + коммит с versionName
       # ---------------------------------------------------------------------
       - name: "🎬 PlayerActivity + коммит"
         if: steps.checkytdlp.outputs.skip != 'true'
@@ -2877,7 +2993,6 @@ jobs:
           import android.view.KeyEvent
           import android.view.View
           import android.widget.Toast
-          import androidx.appcompat.app.AppCompatActivity
           import androidx.core.view.WindowCompat
           import androidx.core.view.WindowInsetsCompat
           import androidx.core.view.WindowInsetsControllerCompat
@@ -2900,7 +3015,7 @@ jobs:
           import okhttp3.OkHttpClient
           import java.util.concurrent.TimeUnit
 
-          class PlayerActivity : AppCompatActivity() {
+          class PlayerActivity : BaseActivity() {
               private lateinit var b: ActivityPlayerBinding
               private var player: ExoPlayer? = null
               private lateinit var trackSelector: DefaultTrackSelector
@@ -2913,6 +3028,8 @@ jobs:
               private val RETRY_DELAY = 2000L
               private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
               private val handler = Handler(Looper.getMainLooper())
+              private var lastPlayerPosition = -1L
+
               private val hideControlsRunnable = Runnable {
                   b.controlsOverlay.visibility = View.GONE
                   b.rightControls.visibility = View.GONE
@@ -2920,6 +3037,27 @@ jobs:
                   b.leftControls.visibility = View.GONE
               }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
+              private val stallChecker = object : Runnable {
+                  override fun run() {
+                      val p = player ?: return
+                      if (!p.isPlaying) {
+                          lastPlayerPosition = -1L
+                          handler.postDelayed(this, 30_000)
+                          return
+                      }
+                      val pos = p.currentPosition
+                      if (lastPlayerPosition == pos && pos > 0) {
+                          CrashLogger.info("Player", "Стоп-кадр на ${pos}мс — перерезолв")
+                          urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
+                          handler.removeCallbacks(this)
+                          handleError("Поток замер")
+                          return
+                      }
+                      lastPlayerPosition = pos
+                      handler.postDelayed(this, 30_000)
+                  }
+              }
 
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
@@ -2944,6 +3082,16 @@ jobs:
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
                   b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
                   b.btnShowLog.setOnClickListener { showLogDialog() }
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  player?.playWhenReady = true
+              }
+
+              override fun onPause() {
+                  super.onPause()
+                  player?.playWhenReady = false
               }
 
               private fun showLogDialog() {
@@ -2979,10 +3127,12 @@ jobs:
                   CrashLogger.info("Player", "Формат: ${b.btnAspect.text}")
               }
 
-              private fun exitApp() {
-                  handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
-                  finishAffinity()
-                  android.os.Process.killProcess(android.os.Process.myPid())
+              override fun exitApp() {
+                  handler.removeCallbacksAndMessages(null)
+                  sleepTimer?.cancel()
+                  player?.release()
+                  player = null
+                  super.exitApp()
               }
 
               private fun handleMenuNavigation(keyCode: Int): Boolean {
@@ -3031,6 +3181,9 @@ jobs:
               }
 
               override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                  if (event.action == KeyEvent.ACTION_DOWN) {
+                      onUserInteraction()
+                  }
                   if (b.channelListPanel.visibility == View.VISIBLE) {
                       if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                           b.channelListPanel.visibility = View.GONE
@@ -3117,10 +3270,23 @@ jobs:
                   b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
                       val direct = StreamResolver.resolve(channelUrl)
-                      if (direct.startsWith("ERROR")) { handleError(direct); return@launch }
+                      if (direct.startsWith("ERROR")) {
+                          val allowRetry = shouldRetry(direct)
+                          handleError(direct, allowRetry)
+                          return@launch
+                      }
                       StreamCache.put(this@PlayerActivity, channelUrl, direct)
                       play(direct)
                   }
+              }
+
+              private fun shouldRetry(errorText: String): Boolean {
+                  return errorText.contains("Timeout", ignoreCase = true) ||
+                         errorText.contains("ConnectionError", ignoreCase = true) ||
+                         errorText.contains("NetworkError", ignoreCase = true) ||
+                         errorText.contains("HTTPError", ignoreCase = true) ||
+                         errorText.contains("IncompleteRead", ignoreCase = true) ||
+                         errorText.contains("SSLError", ignoreCase = true)
               }
 
               private fun buildHttpDataSource(): OkHttpDataSource.Factory {
@@ -3136,6 +3302,8 @@ jobs:
 
               private fun play(m3u8: String) {
                   player?.release()
+                  handler.removeCallbacks(stallChecker)
+                  lastPlayerPosition = -1L
                   val dataSource = buildHttpDataSource()
                   val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
                   trackSelector = DefaultTrackSelector(this)
@@ -3159,6 +3327,7 @@ jobs:
                   b.progress.visibility = View.GONE
                   b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
                   showControls()
+                  handler.postDelayed(stallChecker, 30_000)
                   b.btnQuality.setOnClickListener { showQualityDialog(); resetHideTimeout() }
                   b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
                   b.btnPlayPause.setOnClickListener {
@@ -3202,22 +3371,25 @@ jobs:
                   }.show()
               }
 
-              private fun handleError(errorText: String? = null) {
-                  if (retryCount < MAX_RETRIES) {
+              private fun handleError(errorText: String? = null, allowRetry: Boolean = true) {
+                  handler.removeCallbacks(stallChecker)
+                  if (allowRetry && retryCount < MAX_RETRIES) {
                       retryCount++
+                      val delay = RETRY_DELAY * (1L shl (retryCount - 1))
                       b.progress.visibility = View.VISIBLE
-                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES")
-                      handler.postDelayed({ startPlayback() }, RETRY_DELAY)
+                      CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES через ${delay/1000}с")
+                      handler.postDelayed({ startPlayback() }, delay)
                   } else {
                       b.progress.visibility = View.GONE
                       val details = errorText ?: "Неизвестная ошибка"
-                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"
+                      val attempts = if (allowRetry) MAX_RETRIES else 0
+                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $attempts"
                       b.errorLayout.visibility = View.VISIBLE
                       b.controlsOverlay.visibility = View.GONE
                       b.rightControls.visibility = View.GONE
                       b.btnSleepTimer.visibility = View.GONE
                       b.leftControls.visibility = View.GONE
-                      CrashLogger.error("Player", "Все попытки исчерпаны")
+                      CrashLogger.error("Player", "Не удалось: $details")
                   }
               }
 
@@ -3268,6 +3440,7 @@ jobs:
 
           RUN_NUMBER="${{ github.run_number }}"
           sed -i "s/versionCode = [0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
+          sed -i "s/versionName = \"[^\"]*\"/versionName = \"$RUN_NUMBER\"/" app/build.gradle
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add -A
@@ -3308,47 +3481,39 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛡 **Новое: тумблер DoH в настройках**
+            🛡 **Новое в этой сборке**
 
-            В карточке «🛡 ЗАЩИТА DNS (AdGuard DoH)» появился переключатель:
+            **Стелс (меньше запросов к VK):**
+            - Стабильный `X-From-Id` (один на устройство, а не новый каждый раз)
+            - Кэш миниатюр (`ThumbCache`, лимит 50) — yt-dlp больше не дёргается каждые 6ч
+            - `ChannelCache` TTL 24ч/48ч (было 6ч/24ч) — 1 запрос к VK в сутки
+            - `StreamCache` TTL 4ч (было 2ч) — в 2 раза меньше резолвов
+            - Не ретраить нефатальные ошибки (мёртвый канал = 1 запрос, не 5)
+            - Exponential backoff 2–32с (не бомбардировка 2с × 5)
+            - Coil `size(120) + INEXACT` — трафик логотипов ×4 меньше
 
-            - **🟢 AdGuard DoH: ВКЛ** — все запросы через `dns.adguard-dns.com` (HTTPS/TLS 1.3)
-            - **🔴 AdGuard DoH: ВЫКЛ** — все запросы через системный DNS (провайдер)
+            **Кэш и автоочистка:**
+            - `CacheManager` — автоочистка раз в 6ч при `onResume`
+            - `ThumbCache` с лимитом 50 записей
+            - Потолок пользовательских данных ~22 МБ, никогда не растёт
 
-            **Как работает:**
-            - Переключение **мгновенное**, без перезапуска приложения.
-            - Действует **везде**: VK API, OTA, плеер (HLS), Coil (логотипы), Python `yt-dlp`.
-            - **Синхронизация Kotlin ↔ Python** с 3 ретраями и проверкой через `doh_health().enabled`.
-            - При неудаче Python-синхронизации — **автоматический откат** (состояние не меняется, в логе `❌ Откат`).
-            - `Coil.reset()` вызывается при переключении, чтобы ImageLoader пересоздался с новой обёрткой.
+            **Автовыключение:**
+            - 4ч без активности (меню или эфир) → полный выход
+            - Через `BaseActivity.onUserInteraction()` — единый таймер на всё приложение
 
-            **Диагностика (кнопка «🔍 Проверить DoH»):**
-            ```
-            🟢 AdGuard DoH: ВКЛ
+            **Стабильность:**
+            - Stall checker — перерезолв при зависшем потоке (30с без движения позиции)
+            - `onPause`/`onResume` — пауза плеера в фоне
+            - Python `_doh_slow_count` сброс после cooldown
+            - `callTimeout(5с)` в диагностике DoH (не висит 80с)
+            - `readConfig()` в try/catch (не крашится без `vk_config.json`)
+            - `btnFavFilter` — правильные цвета (звёздочка + жёлтый при активном)
+            - `progress.VISIBLE` при «Обновить»
 
-            ✅ AdGuard DoH (Kotlin) — 128 мс
-               wikipedia.org → 185.15.58.224
-            ✅ AdGuard DoH (Python) — доступен
-               DoH: 5 · фолбэк: 0 · кэш: 3
-            ✅ Системный DNS (фолбэк) — 45 мс
-            ✅ VK API через DoH — 245 мс
-            ✅ GitHub через DoH — 198 мс
-
-            ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            Итог: 5/5 ✅
-            🎉 Все запросы идут через защищённый DNS!
-            ```
-
-            **Учтённые риски (из предыдущих обсуждений):**
-            - ✅ Детект блок-страниц AdGuard (`8.6.x.x` → `❌ AdGuard заблокировал`)
-            - ✅ Счётчики `doh_resolved` / `system_fallback` / `slow_count` в Python
-            - ✅ `dnspython==2.6.1` зафиксирован, CI проверяет конфликт с `yt-dlp`
-            - ✅ Circuit breaker срабатывает на медленный DoH (`DOH_SLOW_THRESHOLD=1.2с`)
-            - ✅ Лог скорости OTA (`⚠️ Медленная загрузка — возможен троттлинг`)
-
-            **Не учтено (осознанно):**
-            - C-extension в `yt-dlp` мимо monkey-patch — маловероятно, счётчики покажут
-            - Системный DNS Android (captive portal, служебные запросы ОС) — вне контроля приложения
+            **Мелочи:**
+            - `versionName = ${{ github.run_number }}` (раньше всегда «1.0»)
+            - Убран мёртвый `<service .PlaybackService>` из манифеста
+            - `setup-java@v5` (v4 deprecated)
 
             📦 Скачайте APK и установите поверх старой версии.
           files: ${{ steps.apk.outputs.file }}
