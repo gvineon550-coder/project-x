@@ -216,7 +216,7 @@ class PlayerActivity : AppCompatActivity() {
         b.channelListRecycler.layoutManager = LinearLayoutManager(this)
         b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
             val idx = urls.indexOf(ch.url)
-            if (idx >= 0) { currentIndex = idx; startPlayback() }
+            if (idx >= 0) { currentIndex = idx; retryCount = 0; startPlayback() }
             b.channelListPanel.visibility = View.GONE
         }
         b.channelListRecycler.scrollToPosition(currentIndex)
@@ -225,7 +225,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun switchChannel(direction: Int) {
         val newIndex = currentIndex + direction
-        if (newIndex in urls.indices) { currentIndex = newIndex; startPlayback() }
+        if (newIndex in urls.indices) { currentIndex = newIndex; retryCount = 0; startPlayback() }
     }
 
     private fun startPlayback() {
@@ -238,7 +238,6 @@ class PlayerActivity : AppCompatActivity() {
         handler.removeCallbacks(hideChannelOverlayRunnable)
         handler.postDelayed(hideChannelOverlayRunnable, 3000)
         b.errorLayout.visibility = View.GONE
-        retryCount = 0
         val channelUrl = urls.getOrNull(currentIndex) ?: return
         val cached = StreamCache.get(this, channelUrl)
         if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
