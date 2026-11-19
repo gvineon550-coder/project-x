@@ -49,10 +49,6 @@ jobs:
       - name: Accept licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-      # ---------------------------------------------------------------------
-      # PRE-FLIGHT: проверка AdGuard DoH из CI (не блокирует сборку)
-      # + проверка совместимости yt-dlp и dnspython (риск №3)
-      # ---------------------------------------------------------------------
       - name: "🌐 Pre-flight проверка DoH AdGuard"
         if: steps.checkytdlp.outputs.skip != 'true'
         continue-on-error: true
@@ -99,9 +95,6 @@ jobs:
               print(f"ℹ️ Проверка блокировки не удалась: {type(e).__name__}")
           PYEOF
 
-      # ---------------------------------------------------------------------
-      # BUILD.GRADLE + ресурсы + layout
-      # ---------------------------------------------------------------------
       - name: "📦 Манифест, иконки, сплэш, фоны, layout"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -1080,9 +1073,6 @@ jobs:
               android:background="?attr/selectableItemBackground" />
           EOF
 
-      # ---------------------------------------------------------------------
-      # PYTHON RESOLVER
-      # ---------------------------------------------------------------------
       - name: "🐍 Python (DoH с счётчиками и slow-trigger breaker)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -1261,10 +1251,6 @@ jobs:
                   return ""
           EOF
 
-      # ---------------------------------------------------------------------
-      # Core utils: CrashLogger, DohSettings, BaseActivity, CacheManager,
-      # ThumbCache, TVPlayerApp, UpdateDialog
-      # ---------------------------------------------------------------------
       - name: "📝 Core utils (CrashLogger, Base, Cache, Thumb, App)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -1648,9 +1634,6 @@ jobs:
           }
           EOF
 
-      # ---------------------------------------------------------------------
-      # DOH PROVIDER (с callTimeout в диагностике)
-      # ---------------------------------------------------------------------
       - name: "🌐 DoH Provider (синглтон + диагностика)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -1913,11 +1896,6 @@ jobs:
           }
           EOF
 
-      # ---------------------------------------------------------------------
-      # Kotlin Core: VkApi (стабильный X-From-Id), ChannelCache (24h/48h),
-      # NetworkUtils, StreamResolver, StreamCache (4h), ChannelAdapter (INEXACT),
-      # ChannelListAdapter, UpdateChecker
-      # ---------------------------------------------------------------------
       - name: "🧠 Kotlin Core"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -2346,10 +2324,6 @@ jobs:
           }
           EOF
 
-      # ---------------------------------------------------------------------
-      # MainActivity (extends BaseActivity, ThumbCache, readConfig try/catch,
-      # btnFavFilter fix, progress.VISIBLE)
-      # ---------------------------------------------------------------------
       - name: "🧠 MainActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -2657,9 +2631,6 @@ jobs:
           }
           EOF
 
-      # ---------------------------------------------------------------------
-      # SettingsActivity (extends BaseActivity, exitApp() из Base)
-      # ---------------------------------------------------------------------
       - name: "⚙ SettingsActivity (тумблер DoH)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
@@ -2971,12 +2942,7 @@ jobs:
           }
           EOF
 
-      # ---------------------------------------------------------------------
-      # PlayerActivity (extends BaseActivity, stall checker, exponential backoff,
-      # shouldRetry, onPause/onResume, onUserInteraction в dispatchKeyEvent,
-      # override exitApp) + коммит с versionName
-      # ---------------------------------------------------------------------
-      - name: "🎬 PlayerActivity + коммит"
+      - name: "🎬 PlayerActivity"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/java/com/tvplayer/app/PlayerActivity.kt << 'EOF'
@@ -3438,6 +3404,9 @@ jobs:
           }
           EOF
 
+      - name: "💾 Коммит версии"
+        if: steps.checkytdlp.outputs.skip != 'true'
+        run: |
           RUN_NUMBER="${{ github.run_number }}"
           sed -i "s/versionCode = [0-9]*/versionCode = $RUN_NUMBER/" app/build.gradle
           sed -i "s/versionName = \"[^\"]*\"/versionName = \"$RUN_NUMBER\"/" app/build.gradle
@@ -3484,37 +3453,36 @@ jobs:
             🛡 **Новое в этой сборке**
 
             **Стелс (меньше запросов к VK):**
-            - Стабильный `X-From-Id` (один на устройство, а не новый каждый раз)
-            - Кэш миниатюр (`ThumbCache`, лимит 50) — yt-dlp больше не дёргается каждые 6ч
-            - `ChannelCache` TTL 24ч/48ч (было 6ч/24ч) — 1 запрос к VK в сутки
-            - `StreamCache` TTL 4ч (было 2ч) — в 2 раза меньше резолвов
-            - Не ретраить нефатальные ошибки (мёртвый канал = 1 запрос, не 5)
-            - Exponential backoff 2–32с (не бомбардировка 2с × 5)
-            - Coil `size(120) + INEXACT` — трафик логотипов ×4 меньше
+            - Стабильный `X-From-Id` (один на устройство)
+            - Кэш миниатюр (`ThumbCache`, лимит 50)
+            - `ChannelCache` TTL 24ч/48ч
+            - `StreamCache` TTL 4ч
+            - Не ретраить нефатальные ошибки (мёртвый канал = 1 запрос)
+            - Exponential backoff 2–32с
+            - Coil `size(120) + INEXACT`
 
             **Кэш и автоочистка:**
-            - `CacheManager` — автоочистка раз в 6ч при `onResume`
-            - `ThumbCache` с лимитом 50 записей
-            - Потолок пользовательских данных ~22 МБ, никогда не растёт
+            - `CacheManager` раз в 6ч при `onResume`
+            - `ThumbCache` с лимитом 50
+            - Потолок данных ~22 МБ
 
             **Автовыключение:**
-            - 4ч без активности (меню или эфир) → полный выход
-            - Через `BaseActivity.onUserInteraction()` — единый таймер на всё приложение
+            - 4ч без активности → полный выход
 
             **Стабильность:**
-            - Stall checker — перерезолв при зависшем потоке (30с без движения позиции)
-            - `onPause`/`onResume` — пауза плеера в фоне
-            - Python `_doh_slow_count` сброс после cooldown
-            - `callTimeout(5с)` в диагностике DoH (не висит 80с)
-            - `readConfig()` в try/catch (не крашится без `vk_config.json`)
-            - `btnFavFilter` — правильные цвета (звёздочка + жёлтый при активном)
+            - Stall checker (перерезолв при зависании)
+            - `onPause`/`onResume` плеера
+            - `_doh_slow_count` сброс
+            - `callTimeout(5с)` диагностики
+            - `readConfig()` try/catch
+            - `btnFavFilter` правильные цвета
             - `progress.VISIBLE` при «Обновить»
 
             **Мелочи:**
-            - `versionName = ${{ github.run_number }}` (раньше всегда «1.0»)
-            - Убран мёртвый `<service .PlaybackService>` из манифеста
-            - `setup-java@v5` (v4 deprecated)
+            - `versionName` = номер сборки
+            - Убран мёртвый `<service .PlaybackService>`
+            - `setup-java@v5`
 
-            📦 Скачайте APK и установите поверх старой версии.
+            📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
