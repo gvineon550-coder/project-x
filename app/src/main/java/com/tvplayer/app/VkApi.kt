@@ -4,7 +4,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 data class Channel(val name: String, val url: String, val logo: String, val group: String = "VK Live", var isFavorite: Boolean = false)
@@ -22,14 +21,21 @@ private val UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 suspend fun loadChannels(context: android.content.Context, categoryId: String, manual: List<Channel>): List<Channel> =
     withContext(Dispatchers.IO) {
         val result = mutableListOf<Channel>()
+        if (categoryId.isBlank()) {
+            CrashLogger.info("VkApi", "categoryId пустой — только manual (${manual.size})")
+            return@withContext manual
+        }
         val startTime = System.currentTimeMillis()
         CrashLogger.info("VkApi", "→ Загрузка каналов, category=$categoryId")
         try {
+            val fromId = context.getSharedPreferences("tvplayer", android.content.Context.MODE_PRIVATE)
+                .getString("vk_from_id", null)
+                ?: java.util.UUID.randomUUID().toString()
             val url = "https://api.live.vkvideo.ru/v1/catalog/public_video_streams/category/$categoryId/stream/?limit=100"
             val req = Request.Builder().url(url)
                 .header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
                 .header("Origin", "https://live.vkvideo.ru").header("Referer", "https://live.vkvideo.ru/")
-                .header("X-App", "streams_web").header("X-From-Id", UUID.randomUUID().toString()).build()
+                .header("X-App", "streams_web").header("X-From-Id", fromId).build()
             buildClient(context).newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
                 CrashLogger.info("VkApi", "← HTTP ${resp.code}, размер: ${body.length} байт")

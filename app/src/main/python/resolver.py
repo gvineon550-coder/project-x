@@ -78,6 +78,8 @@ def _doh_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
                 _doh_slow_count += 1
                 if _doh_slow_count >= 3:
                     _doh_fail_until = time.time() + _DOH_COOLDOWN
+                    _doh_slow_count = 0
+                    _doh_consecutive_fails = 0
             else:
                 _doh_slow_count = 0
             if not ips:

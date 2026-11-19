@@ -4,14 +4,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.os.StatFs
 import android.provider.Settings
 import android.view.View
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
@@ -26,7 +25,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-class MainActivity : AppCompatActivity(), ImageLoaderFactory {
+class MainActivity : BaseActivity(), ImageLoaderFactory {
     private lateinit var b: ActivityMainBinding
     private var allChannels: List<Channel> = emptyList()
     private var showOnlyFavorites = false
@@ -52,9 +51,11 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
 
-        performStartupCleanup()
-
-        b.btnRefresh.setOnClickListener { CrashLogger.info("UI", "Кнопка Обновить"); loadFromNetwork(forceRefresh = true) }
+        b.btnRefresh.setOnClickListener {
+            CrashLogger.info("UI", "Кнопка Обновить")
+            b.progress.visibility = View.VISIBLE
+            loadFromNetwork(forceRefresh = true)
+        }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
         b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
@@ -98,88 +99,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
-    private fun performStartupCleanup() {
-        try {
-            val updateApk = File(cacheDir, "update.apk")
-            if (updateApk.exists()) {
-                val sizeMb = updateApk.length() / 1024 / 1024
-                updateApk.delete()
-                CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
-            }
-
-            StreamCache.cleanup(this)
-
-            val staleKeys = listOf("last_ota_check", "last_ota_version")
-            val editor = prefs.edit()
-            var removedKeys = 0
-            staleKeys.forEach { k -> if (prefs.contains(k)) { editor.remove(k); removedKeys++ } }
-            if (removedKeys > 0) {
-                editor.apply()
-                CrashLogger.info("Cleanup", "Удалено $removedKeys устаревших ключей prefs")
-            }
-
-            val sevenDays = 7L * 24 * 60 * 60 * 1000
-            val now = System.currentTimeMillis()
-            var oldRemoved = 0
-            var oldBytes = 0L
-            cacheDir.listFiles()?.forEach { f ->
-                if (f.isFile && (now - f.lastModified()) > sevenDays) {
-                    oldBytes += f.length()
-                    if (f.delete()) oldRemoved++
-                } else if (f.isDirectory) {
-                    f.listFiles()?.forEach { inner ->
-                        if (inner.isFile && (now - inner.lastModified()) > sevenDays) {
-                            oldBytes += inner.length()
-                            if (inner.delete()) oldRemoved++
-                        }
-                    }
-                }
-            }
-            if (oldRemoved > 0) {
-                CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
-            }
-
-            var cacheSize = 0L
-            cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-            if (cacheSize > 15 * 1024 * 1024) {
-                val mb = cacheSize / 1024 / 1024
-                cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
-                cacheSize = 0L
-            }
-
-            var filesSize = 0L
-            filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-            val filesMb = filesSize / 1024 / 1024
-            if (filesSize > 50 * 1024 * 1024) {
-                CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
-                ChannelCache.clear(this)
-                CrashLogger.clear(this)
-                filesSize = 0L
-                filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-            } else if (filesSize > 30 * 1024 * 1024) {
-                CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
-            }
-
-            val stat = StatFs(filesDir.path)
-            val freeMb = stat.availableBytes / 1024 / 1024
-            if (freeMb < 100) {
-                CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
-            }
-
-            CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
-        } catch (e: Exception) {
-            CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
-        }
-    }
-
     private fun loadInitial() {
         val cached = ChannelCache.load(this)
         if (cached != null && cached.isNotEmpty()) {
             allChannels = cached
             updateView(scrollToLast = true)
             if (ChannelCache.isFresh(this)) {
-                CrashLogger.info("MainActivity", "Кэш свежий (<6ч), VK не дёргаем")
+                CrashLogger.info("MainActivity", "Кэш свежий (<24ч), VK не дёргаем")
                 return
             }
             CrashLogger.info("MainActivity", "Кэш устарел — обновление в фоне")
@@ -194,8 +120,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private fun loadFromNetwork(forceRefresh: Boolean) {
         if (!NetworkUtils.isOnline(this)) {
             CrashLogger.info("MainActivity", "Нет интернета — отмена")
+            b.progress.visibility = View.GONE
             if (allChannels.isEmpty()) {
-                b.progress.visibility = View.GONE
                 b.recycler.visibility = View.GONE
                 b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
                 b.error.visibility = View.VISIBLE
@@ -207,11 +133,23 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 val (manual, cat) = readConfig()
                 val manualWithLogos = manual.map { ch ->
                     if (ch.logo.isBlank()) {
-                        val thumb = StreamResolver.getThumbnail(ch.url)
-                        if (thumb.isNotBlank()) ch.copy(logo = thumb) else ch
+                        val cached = ThumbCache.get(this@MainActivity, ch.url)
+                        if (cached != null) ch.copy(logo = cached)
+                        else {
+                            val thumb = StreamResolver.getThumbnail(ch.url)
+                            if (thumb.isNotBlank()) {
+                                ThumbCache.put(this@MainActivity, ch.url, thumb)
+                                ch.copy(logo = thumb)
+                            } else ch
+                        }
                     } else ch
                 }
-                val fresh = loadChannels(this@MainActivity, cat, manualWithLogos)
+                val fresh = if (cat.isBlank() && manualWithLogos.isNotEmpty()) {
+                    CrashLogger.info("MainActivity", "categoryId пустой — только ручные каналы")
+                    manualWithLogos
+                } else {
+                    loadChannels(this@MainActivity, cat, manualWithLogos)
+                }
                 b.progress.visibility = View.GONE
                 if (fresh.isNotEmpty()) {
                     val changed = fresh.size != allChannels.size || fresh.zip(allChannels).any { it.first.url != it.second.url }
@@ -276,11 +214,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             .show()
     }
 
-    private fun exitApp() {
-        finishAffinity()
-        android.os.Process.killProcess(android.os.Process.myPid())
-    }
-
     private fun startUpdateDownload(url: String) {
         Toast.makeText(this, "Загрузка обновления...", Toast.LENGTH_LONG).show()
         lifecycleScope.launch {
@@ -324,7 +257,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         val sorted = allChannels.sortedByDescending { it.isFavorite }
         val displayed = if (showOnlyFavorites) sorted.filter { it.isFavorite } else sorted
         b.txtTitle.text = if (showOnlyFavorites) "Избранное (${displayed.size})" else "Все каналы (${displayed.size})"
-        b.btnFavFilter.setTextColor(if (showOnlyFavorites) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FFEB3B"))
+        b.btnFavFilter.text = if (showOnlyFavorites) "★ Избранное" else "☆ Избранное"
+        b.btnFavFilter.setTextColor(if (showOnlyFavorites) Color.parseColor("#FFEB3B") else Color.parseColor("#FF8A8D93"))
         b.recycler.visibility = View.VISIBLE
         b.recycler.adapter = ChannelAdapter(displayed, { ch ->
             needScrollOnResume = true
@@ -348,10 +282,20 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     }
 
     private fun readConfig(): Pair<List<Channel>, String> {
-        val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
-        val o = JSONObject(json); val manual = mutableListOf<Channel>()
-        o.optJSONArray("channels")?.let { arr -> for (i in 0 until arr.length()) { val c = arr.getJSONObject(i); manual.add(Channel(c.optString("name"), c.optString("url"), c.optString("logo"), c.optString("group", "VK Video"))) } }
-        val cats = o.optJSONArray("categories")
-        return manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
+        return try {
+            val json = assets.open("vk_config.json").bufferedReader().use { it.readText() }
+            val o = JSONObject(json); val manual = mutableListOf<Channel>()
+            o.optJSONArray("channels")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val c = arr.getJSONObject(i)
+                    manual.add(Channel(c.optString("name"), c.optString("url"), c.optString("logo"), c.optString("group", "VK Video")))
+                }
+            }
+            val cats = o.optJSONArray("categories")
+            manual to (if (cats != null && cats.length() > 0) cats.getString(0) else "")
+        } catch (e: Exception) {
+            CrashLogger.error("MainActivity", "Ошибка чтения vk_config.json", e)
+            emptyList<Channel>() to ""
+        }
     }
 }

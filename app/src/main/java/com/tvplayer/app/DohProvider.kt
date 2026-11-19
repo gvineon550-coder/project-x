@@ -8,6 +8,7 @@ import okhttp3.dnsoverhttps.DnsOverHttps
 import java.io.File
 import java.net.InetAddress
 import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
 
 object DohProvider {
     private const val DOH_URL = "https://dns.adguard-dns.com/dns-query"
@@ -16,10 +17,6 @@ object DohProvider {
     @Volatile private var cached: Dns? = null
     @Volatile private var cachedContext: Context? = null
 
-    // ВАЖНО: НЕ возвращаем Dns.SYSTEM напрямую при выключке.
-    // Возвращаем обёртку, которая смотрит на флаг на каждом lookup().
-    // Это позволяет переключать тумблер в обе стороны без перезапуска
-    // — в том числе для уже созданных клиентов (Coil, OkHttp пулы).
     fun createWithFallback(context: Context): Dns {
         val appCtx = context.applicationContext
         cached?.let { if (cachedContext === appCtx) return it }
@@ -83,7 +80,9 @@ object DohProvider {
             return false
         }
         return try {
-            val client = OkHttpClient.Builder().build()
+            val client = OkHttpClient.Builder()
+                .callTimeout(5, TimeUnit.SECONDS)
+                .build()
             val doh = DnsOverHttps.Builder()
                 .client(client)
                 .url(DOH_URL.toHttpUrl())
@@ -122,7 +121,9 @@ object DohProvider {
     private fun tryResolveDoH(host: String): TestResult {
         val started = System.currentTimeMillis()
         return try {
-            val client = OkHttpClient.Builder().build()
+            val client = OkHttpClient.Builder()
+                .callTimeout(5, TimeUnit.SECONDS)
+                .build()
             val doh = DnsOverHttps.Builder()
                 .client(client)
                 .url(DOH_URL.toHttpUrl())

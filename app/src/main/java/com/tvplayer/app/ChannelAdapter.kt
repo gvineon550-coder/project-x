@@ -4,6 +4,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import coil.size.Precision
 class ChannelAdapter(
     private val items: List<Channel>,
     private val onClick: (Channel) -> Unit,
@@ -21,7 +22,13 @@ class ChannelAdapter(
         h.txtNumber.text = (pos + 1).toString()
         h.name.text = ch.name
         if (ch.logo.isNotBlank()) {
-            h.logo.load(ch.logo) { crossfade(true); size(160, 160); placeholder(android.R.color.darker_gray); error(android.R.color.darker_gray) }
+            h.logo.load(ch.logo) {
+                crossfade(true)
+                size(120, 120)
+                precision(Precision.INEXACT)
+                placeholder(android.R.color.darker_gray)
+                error(android.R.color.darker_gray)
+            }
         } else {
             h.logo.load(null); h.logo.setImageDrawable(null)
         }

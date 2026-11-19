@@ -1,15 +1,23 @@
 package com.tvplayer.app
 import com.chaquo.python.Python
 import com.chaquo.python.android.PyApplication
+import java.util.UUID
 
 class TVPlayerApp : PyApplication() {
     override fun onCreate() {
         super.onCreate()
         CrashLogger.init(this)
+
+        val prefs = getSharedPreferences("tvplayer", MODE_PRIVATE)
+        if (!prefs.contains("vk_from_id")) {
+            val newId = UUID.randomUUID().toString()
+            prefs.edit().putString("vk_from_id", newId).apply()
+            CrashLogger.info("VkApi", "Сгенерирован X-From-Id: $newId")
+        }
+
         Thread {
             val desired = DohSettings.isEnabled(this)
 
-            // Синхронизация Python-флага с ретраями и проверкой
             var synced = false
             for (attempt in 0 until 3) {
                 try {

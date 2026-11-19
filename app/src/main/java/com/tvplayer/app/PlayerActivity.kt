@@ -11,7 +11,6 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -34,7 +33,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-class PlayerActivity : AppCompatActivity() {
+class PlayerActivity : BaseActivity() {
     private lateinit var b: ActivityPlayerBinding
     private var player: ExoPlayer? = null
     private lateinit var trackSelector: DefaultTrackSelector
@@ -47,6 +46,8 @@ class PlayerActivity : AppCompatActivity() {
     private val RETRY_DELAY = 2000L
     private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     private val handler = Handler(Looper.getMainLooper())
+    private var lastPlayerPosition = -1L
+
     private val hideControlsRunnable = Runnable {
         b.controlsOverlay.visibility = View.GONE
         b.rightControls.visibility = View.GONE
@@ -54,6 +55,27 @@ class PlayerActivity : AppCompatActivity() {
         b.leftControls.visibility = View.GONE
     }
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
+    private val stallChecker = object : Runnable {
+        override fun run() {
+            val p = player ?: return
+            if (!p.isPlaying) {
+                lastPlayerPosition = -1L
+                handler.postDelayed(this, 30_000)
+                return
+            }
+            val pos = p.currentPosition
+            if (lastPlayerPosition == pos && pos > 0) {
+                CrashLogger.info("Player", "Стоп-кадр на ${pos}мс — перерезолв")
+                urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
+                handler.removeCallbacks(this)
+                handleError("Поток замер")
+                return
+            }
+            lastPlayerPosition = pos
+            handler.postDelayed(this, 30_000)
+        }
+    }
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
@@ -78,6 +100,16 @@ class PlayerActivity : AppCompatActivity() {
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
         b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
         b.btnShowLog.setOnClickListener { showLogDialog() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        player?.playWhenReady = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        player?.playWhenReady = false
     }
 
     private fun showLogDialog() {
@@ -113,10 +145,12 @@ class PlayerActivity : AppCompatActivity() {
         CrashLogger.info("Player", "Формат: ${b.btnAspect.text}")
     }
 
-    private fun exitApp() {
-        handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
-        finishAffinity()
-        android.os.Process.killProcess(android.os.Process.myPid())
+    override fun exitApp() {
+        handler.removeCallbacksAndMessages(null)
+        sleepTimer?.cancel()
+        player?.release()
+        player = null
+        super.exitApp()
     }
 
     private fun handleMenuNavigation(keyCode: Int): Boolean {
@@ -165,6 +199,9 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            onUserInteraction()
+        }
         if (b.channelListPanel.visibility == View.VISIBLE) {
             if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                 b.channelListPanel.visibility = View.GONE
@@ -251,10 +288,23 @@ class PlayerActivity : AppCompatActivity() {
         b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val direct = StreamResolver.resolve(channelUrl)
-            if (direct.startsWith("ERROR")) { handleError(direct); return@launch }
+            if (direct.startsWith("ERROR")) {
+                val allowRetry = shouldRetry(direct)
+                handleError(direct, allowRetry)
+                return@launch
+            }
             StreamCache.put(this@PlayerActivity, channelUrl, direct)
             play(direct)
         }
+    }
+
+    private fun shouldRetry(errorText: String): Boolean {
+        return errorText.contains("Timeout", ignoreCase = true) ||
+               errorText.contains("ConnectionError", ignoreCase = true) ||
+               errorText.contains("NetworkError", ignoreCase = true) ||
+               errorText.contains("HTTPError", ignoreCase = true) ||
+               errorText.contains("IncompleteRead", ignoreCase = true) ||
+               errorText.contains("SSLError", ignoreCase = true)
     }
 
     private fun buildHttpDataSource(): OkHttpDataSource.Factory {
@@ -270,6 +320,8 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun play(m3u8: String) {
         player?.release()
+        handler.removeCallbacks(stallChecker)
+        lastPlayerPosition = -1L
         val dataSource = buildHttpDataSource()
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
         trackSelector = DefaultTrackSelector(this)
@@ -293,6 +345,7 @@ class PlayerActivity : AppCompatActivity() {
         b.progress.visibility = View.GONE
         b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
         showControls()
+        handler.postDelayed(stallChecker, 30_000)
         b.btnQuality.setOnClickListener { showQualityDialog(); resetHideTimeout() }
         b.btnSleepTimer.setOnClickListener { showSleepTimerDialog(); resetHideTimeout() }
         b.btnPlayPause.setOnClickListener {
@@ -336,22 +389,25 @@ class PlayerActivity : AppCompatActivity() {
         }.show()
     }
 
-    private fun handleError(errorText: String? = null) {
-        if (retryCount < MAX_RETRIES) {
+    private fun handleError(errorText: String? = null, allowRetry: Boolean = true) {
+        handler.removeCallbacks(stallChecker)
+        if (allowRetry && retryCount < MAX_RETRIES) {
             retryCount++
+            val delay = RETRY_DELAY * (1L shl (retryCount - 1))
             b.progress.visibility = View.VISIBLE
-            CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES")
-            handler.postDelayed({ startPlayback() }, RETRY_DELAY)
+            CrashLogger.info("Player", "Попытка $retryCount/$MAX_RETRIES через ${delay/1000}с")
+            handler.postDelayed({ startPlayback() }, delay)
         } else {
             b.progress.visibility = View.GONE
             val details = errorText ?: "Неизвестная ошибка"
-            b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $MAX_RETRIES"
+            val attempts = if (allowRetry) MAX_RETRIES else 0
+            b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $attempts"
             b.errorLayout.visibility = View.VISIBLE
             b.controlsOverlay.visibility = View.GONE
             b.rightControls.visibility = View.GONE
             b.btnSleepTimer.visibility = View.GONE
             b.leftControls.visibility = View.GONE
-            CrashLogger.error("Player", "Все попытки исчерпаны")
+            CrashLogger.error("Player", "Не удалось: $details")
         }
     }
 

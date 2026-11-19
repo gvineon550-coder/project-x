@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import coil.Coil
@@ -19,14 +18,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-class SettingsActivity : AppCompatActivity() {
+class SettingsActivity : BaseActivity() {
     private lateinit var b: ActivitySettingsBinding
 
     override fun onCreate(s: Bundle?) {
         super.onCreate(s)
         b = ActivitySettingsBinding.inflate(layoutInflater); setContentView(b.root)
 
-        b.txtVersion.text = "TV Player v${BuildConfig.VERSION_CODE}"
+        b.txtVersion.text = "TV Player v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
         b.txtAbout.text = """
             Лёгкое и быстрое приложение для просмотра телеканалов VK Live.
 
@@ -38,8 +37,8 @@ class SettingsActivity : AppCompatActivity() {
             • Переключение пультом вверх/вниз
             • Панель каналов в плеере (ОК)
             • Таймер сна (5м – 5ч)
-            • Ручное обновление (⬇️ в шапке)
-            • Умное кэширование + автоочистка
+            • Автовыключение через 4ч без активности
+            • Умное кэширование + автоочистка (6ч)
             • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
             • Тумблер DoH + диагностика
             • Подробный лог
@@ -66,6 +65,7 @@ class SettingsActivity : AppCompatActivity() {
             imageLoader.memoryCache?.clear()
             StreamCache.clearAll(this)
             ChannelCache.clear(this)
+            ThumbCache.clear(this)
             cacheDir.listFiles()?.forEach { it.deleteRecursively() }
             Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
             updateCacheInfo()
@@ -99,8 +99,7 @@ class SettingsActivity : AppCompatActivity() {
 
         b.btnExitApp.setOnClickListener {
             CrashLogger.info("Settings", "Полный выход")
-            finishAffinity()
-            android.os.Process.killProcess(android.os.Process.myPid())
+            exitApp()
         }
     }
 
@@ -122,16 +121,9 @@ class SettingsActivity : AppCompatActivity() {
         b.btnToggleDoh.setTextColor(Color.parseColor("#FF8A8D93"))
 
         lifecycleScope.launch {
-            // 1) Kotlin-флаг — сохраняем сразу. Все новые lookup() увидят его мгновенно,
-            //    т.к. createWithFallback всегда возвращает обёртку, а обёртка смотрит на флаг.
             DohSettings.setEnabled(this@SettingsActivity, newState)
-
-            // 2) Python-флаг с ретраями + проверка через doh_health().enabled
             val pyOk = withContext(Dispatchers.IO) { syncPythonDohFlag(newState) }
 
-            // 3) Coil: ImageLoader уже создан и держит OkHttpClient с обёрткой.
-            //    Обёртка смотрит на флаг динамически — это само по себе достаточно.
-            //    Но для чистоты пересоздаём ImageLoader на случай кэшей внутри клиента.
             try {
                 Coil.reset()
                 CrashLogger.info("DoH", "Coil.reset() — ImageLoader пересоздан с новым состоянием")
@@ -139,10 +131,9 @@ class SettingsActivity : AppCompatActivity() {
                 CrashLogger.error("DoH", "Coil.reset() не удался", e)
             }
 
-            // 4) Откат при неудаче Python-синхронизации (чтобы Kotlin и Python не разъехались)
             if (!pyOk) {
                 DohSettings.setEnabled(this@SettingsActivity, !newState)
-                if (!newState) DohProvider.invalidate()  // был выключен — включаем обратно
+                if (!newState) DohProvider.invalidate()
                 try { Coil.reset() } catch (_: Exception) {}
                 updateDohToggleUI()
                 Toast.makeText(
@@ -208,12 +199,12 @@ class SettingsActivity : AppCompatActivity() {
             getSharedPreferences("stream_cache", MODE_PRIVATE).edit().clear().apply()
             getSharedPreferences("doh_settings", MODE_PRIVATE).edit().clear().apply()
             ChannelCache.clear(this)
+            ThumbCache.clear(this)
             CrashLogger.clear(this)
             val il = Coil.imageLoader(this)
             il.diskCache?.clear()
             il.memoryCache?.clear()
             cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            // Сбросили prefs → DoH вернулся в default (true)
             DohProvider.invalidate()
             try { Coil.reset() } catch (_: Exception) {}
             lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }

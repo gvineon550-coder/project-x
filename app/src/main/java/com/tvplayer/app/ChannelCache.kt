@@ -6,8 +6,8 @@ import java.io.File
 
 object ChannelCache {
     private const val FILE_NAME = "channels_cache.json"
-    private const val FRESH_TTL_MS = 6 * 60 * 60 * 1000L
-    private const val EXPIRE_TTL_MS = 24 * 60 * 60 * 1000L
+    private const val FRESH_TTL_MS = 24 * 60 * 60 * 1000L
+    private const val EXPIRE_TTL_MS = 48 * 60 * 60 * 1000L
 
     fun save(context: Context, channels: List<Channel>) {
         try {
@@ -37,7 +37,7 @@ object ChannelCache {
             val root = JSONObject(file.readText())
             val ts = root.optLong("timestamp", 0L)
             if (System.currentTimeMillis() - ts > EXPIRE_TTL_MS) {
-                CrashLogger.info("ChannelCache", "Кэш устарел (>24ч)")
+                CrashLogger.info("ChannelCache", "Кэш устарел (>48ч)")
                 return null
             }
             val arr = root.optJSONArray("channels") ?: return null
