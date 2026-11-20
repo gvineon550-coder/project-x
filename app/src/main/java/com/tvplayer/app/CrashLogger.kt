@@ -10,7 +10,7 @@ import java.util.Locale
 
 object CrashLogger {
     private const val LOG_FILE = "app.log"
-    private const val MAX_SIZE = 500 * 1024
+    private const val MAX_SIZE = 200 * 1024
     private var appContext: Context? = null
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 

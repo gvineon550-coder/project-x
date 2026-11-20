@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.tvplayer.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -41,7 +42,17 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
             .build()
         return ImageLoader.Builder(this)
             .okHttpClient(dohOkHttp)
-            .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(5L * 1024L * 1024L)
+                    .build()
+            }
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizeBytes(6L * 1024L * 1024L)
+                    .build()
+            }
             .build()
     }
 

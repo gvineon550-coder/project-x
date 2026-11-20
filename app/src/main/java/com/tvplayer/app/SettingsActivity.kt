@@ -38,9 +38,10 @@ class SettingsActivity : BaseActivity() {
             • Панель каналов в плеере (ОК)
             • Таймер сна (5м – 5ч)
             • Автовыключение через 4ч без активности
-            • Умное кэширование + автоочистка (6ч)
+            • Умное кэширование + автоочистка (3ч)
             • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
             • Тумблер DoH + диагностика
+            • Кнопка 🐛 в плеере — живая телеметрия
             • Подробный лог
 
             ⚙️ ТЕХНОЛОГИИ:
@@ -248,13 +249,13 @@ class SettingsActivity : BaseActivity() {
             val pythonSize = totalFiles - channelsCacheSize - logSize
 
             val stats = buildString {
-                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)}")
+                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 5 МБ")
                 appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
-                appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)}")
-                appendLine("📝 Лог: ${formatSize(logSize)}")
+                appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
+                appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
                 appendLine("🐍 Python: ${formatSize(pythonSize)}")
-                appendLine("📦 Cache всего: ${formatSize(totalCache)}")
-                append("💾 Files всего: ${formatSize(totalFiles)}")
+                appendLine("📦 Cache всего: ${formatSize(totalCache)} / 8 МБ")
+                append("💾 Files всего: ${formatSize(totalFiles)} / 30 МБ")
             }
             b.txtCacheStats.text = stats
             b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))

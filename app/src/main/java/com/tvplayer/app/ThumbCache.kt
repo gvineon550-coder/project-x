@@ -3,7 +3,7 @@ import android.content.Context
 
 object ThumbCache {
     private const val PREFS = "thumb_cache"
-    private const val MAX_ENTRIES = 50
+    private const val MAX_ENTRIES = 30
 
     fun get(context: Context, url: String): String? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(url, null)

@@ -40,7 +40,7 @@ object DohProvider {
     private fun build(context: Context): Dns {
         val httpClient = OkHttpClient.Builder().build()
         val doh = try {
-            val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
+            val cache = Cache(File(context.cacheDir, "doh_cache"), 256L * 1024)
             val bootstrapClient = httpClient.newBuilder().cache(cache).build()
             DnsOverHttps.Builder()
                 .client(bootstrapClient)

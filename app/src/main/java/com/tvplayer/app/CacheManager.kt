@@ -6,7 +6,7 @@ import java.io.File
 object CacheManager {
     private const val PREFS = "cache_manager"
     private const val KEY_LAST_CLEANUP = "last_cleanup"
-    private const val MIN_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    private const val MIN_INTERVAL_MS = 3 * 60 * 60 * 1000L
 
     fun maybeCleanup(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -53,7 +53,7 @@ object CacheManager {
 
             var cacheSize = 0L
             context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-            if (cacheSize > 15 * 1024 * 1024) {
+            if (cacheSize > 8 * 1024 * 1024) {
                 val mb = cacheSize / 1024 / 1024
                 context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                 CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
@@ -63,14 +63,14 @@ object CacheManager {
             var filesSize = 0L
             context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
             val filesMb = filesSize / 1024 / 1024
-            if (filesSize > 50 * 1024 * 1024) {
-                CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
+            if (filesSize > 30 * 1024 * 1024) {
+                CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ! Аварийная очистка")
                 ChannelCache.clear(context)
                 CrashLogger.clear(context)
                 filesSize = 0L
                 context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-            } else if (filesSize > 30 * 1024 * 1024) {
-                CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
+            } else if (filesSize > 25 * 1024 * 1024) {
+                CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 25МБ (аномалия)")
             }
 
             val stat = StatFs(context.filesDir.path)

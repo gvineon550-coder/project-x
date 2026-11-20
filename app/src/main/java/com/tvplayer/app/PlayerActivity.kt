@@ -31,6 +31,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.tvplayer.app.databinding.ActivityPlayerBinding
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class PlayerActivity : BaseActivity() {
@@ -47,12 +48,15 @@ class PlayerActivity : BaseActivity() {
     private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     private val handler = Handler(Looper.getMainLooper())
     private var lastPlayerPosition = -1L
+    private var sessionStartTime = 0L
+    private var debugUpdater: Runnable? = null
 
     private val hideControlsRunnable = Runnable {
         b.controlsOverlay.visibility = View.GONE
         b.rightControls.visibility = View.GONE
         b.btnSleepTimer.visibility = View.GONE
         b.leftControls.visibility = View.GONE
+        b.btnBug.visibility = View.GONE
     }
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
 
@@ -93,6 +97,7 @@ class PlayerActivity : BaseActivity() {
         names = intent.getStringArrayListExtra("names") ?: emptyList()
         urls = intent.getStringArrayListExtra("urls") ?: emptyList()
         currentIndex = intent.getIntExtra("index", 0)
+        sessionStartTime = System.currentTimeMillis()
         startPlayback()
 
         b.btnBack.setOnClickListener { finish() }
@@ -100,6 +105,18 @@ class PlayerActivity : BaseActivity() {
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
         b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
         b.btnShowLog.setOnClickListener { showLogDialog() }
+        b.btnBug.setOnClickListener { showDebugPanel() }
+
+        b.btnDebugClose.setOnClickListener { hideDebugPanel() }
+        b.btnDebugRefresh.setOnClickListener {
+            b.debugText.text = buildDebugText()
+            Toast.makeText(this, "Обновлено", Toast.LENGTH_SHORT).show()
+        }
+        b.btnDebugCopy.setOnClickListener {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("debug", b.debugText.text))
+            Toast.makeText(this, "Скопировано", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onResume() {
@@ -110,6 +127,141 @@ class PlayerActivity : BaseActivity() {
     override fun onPause() {
         super.onPause()
         player?.playWhenReady = false
+        if (b.debugPanel.visibility == View.VISIBLE) hideDebugPanel()
+    }
+
+    private fun showDebugPanel() {
+        b.debugPanel.visibility = View.VISIBLE
+        b.controlsOverlay.visibility = View.GONE
+        b.rightControls.visibility = View.GONE
+        b.btnSleepTimer.visibility = View.GONE
+        b.leftControls.visibility = View.GONE
+        b.btnBug.visibility = View.GONE
+        b.debugText.text = buildDebugText()
+        b.btnDebugClose.requestFocus()
+        startDebugUpdater()
+        CrashLogger.info("Player", "Открыта debug-панель")
+    }
+
+    private fun hideDebugPanel() {
+        b.debugPanel.visibility = View.GONE
+        stopDebugUpdater()
+        showControls()
+        CrashLogger.info("Player", "Закрыта debug-панель")
+    }
+
+    private fun startDebugUpdater() {
+        stopDebugUpdater()
+        debugUpdater = object : Runnable {
+            override fun run() {
+                if (b.debugPanel.visibility != View.VISIBLE) return
+                b.debugText.text = buildDebugText()
+                handler.postDelayed(this, 1000)
+            }
+        }
+        handler.postDelayed(debugUpdater!!, 1000)
+    }
+
+    private fun stopDebugUpdater() {
+        debugUpdater?.let { handler.removeCallbacks(it) }
+        debugUpdater = null
+    }
+
+    private fun buildDebugText(): String {
+        val sb = StringBuilder()
+        val ch = names.getOrNull(currentIndex) ?: "?"
+        val chUrl = urls.getOrNull(currentIndex) ?: "?"
+        val cached = StreamCache.get(this, chUrl)
+        val cacheStatus = if (cached != null) "HIT" else "MISS"
+
+        sb.appendLine("📺 #${currentIndex + 1}: $ch")
+        sb.appendLine("  url: ${chUrl.take(50)}")
+        sb.appendLine("  cache: $cacheStatus")
+        sb.appendLine()
+
+        val p = player
+        if (p != null) {
+            sb.appendLine("🎬 ПЛЕЕР")
+            sb.appendLine("  state: ${playerStateName(p.playbackState)}  playing: ${if (p.isPlaying) "▶" else "⏸"}")
+            val bufDelta = (p.bufferedPosition - p.currentPosition) / 1000.0
+            sb.appendLine("  pos: ${formatMs(p.currentPosition)}  buffer: +${"%.1f".format(bufDelta)}с")
+            try {
+                val tracks = p.currentTracks
+                val vg = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO }
+                if (vg != null) {
+                    val idx = (0 until vg.length).firstOrNull { vg.isTrackSelected(it) }
+                    if (idx != null) {
+                        val fmt = vg.getTrackFormat(idx)
+                        val fps = if (fmt.frameRate > 0) fmt.frameRate.toInt() else 0
+                        sb.appendLine("  ${fmt.width}×${fmt.height} @${fps}fps · ${fmt.bitrate/1000} kbps")
+                        sb.appendLine("  video: ${fmt.codecs ?: "?"}")
+                    }
+                }
+            } catch (_: Exception) {}
+            val session = if (sessionStartTime > 0) formatDuration(System.currentTimeMillis() - sessionStartTime) else "?"
+            sb.appendLine("  retry: $retryCount/$MAX_RETRIES · session: $session")
+            sb.appendLine()
+        }
+
+        sb.appendLine("🌐 СЕТЬ: online=${NetworkUtils.isOnline(this)}")
+        sb.appendLine()
+
+        sb.appendLine("🛡 DoH")
+        sb.appendLine("  enabled: ${DohSettings.isEnabled(this)}")
+        try {
+            val m = com.chaquo.python.Python.getInstance().getModule("resolver")
+            val health = m.callAttr("doh_health").toString()
+            val resolved = Regex("'doh_resolved':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+            val fallback = Regex("'system_fallback':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+            val cooldown = Regex("'cooldown_active':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
+            val cacheSize = Regex("'cache_size':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+            sb.appendLine("  resolved: $resolved · fb: $fallback · cache: $cacheSize")
+            sb.appendLine("  circuit: ${if (cooldown) "COOLDOWN" else "OK"}")
+        } catch (_: Exception) { sb.appendLine("  python: error") }
+        sb.appendLine()
+
+        sb.appendLine("💾 КЭШ")
+        val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE)
+        sb.appendLine("  stream: ${streamPrefs.all.size}/120")
+        val thumbPrefs = getSharedPreferences("thumb_cache", MODE_PRIVATE)
+        sb.appendLine("  thumb: ${thumbPrefs.all.size}/30")
+        val coilDisk = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        sb.appendLine("  coil: ${formatBytes(coilDisk)} / 5 МБ")
+        val logFile = File(filesDir, "app.log")
+        sb.appendLine("  log: ${formatBytes(if (logFile.exists()) logFile.length() else 0L)} / 200 КБ")
+        val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        sb.appendLine("  files: ${formatBytes(totalFiles)} / 30 МБ")
+        sb.appendLine()
+
+        sb.appendLine("📦 v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        sb.appendLine("  ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        sb.appendLine("  Android ${android.os.Build.VERSION.RELEASE}")
+
+        return sb.toString()
+    }
+
+    private fun playerStateName(state: Int): String = when (state) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> "?"
+    }
+
+    private fun formatMs(ms: Long): String {
+        val s = ms / 1000; val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+        return String.format("%02d:%02d:%02d", h, m, sec)
+    }
+
+    private fun formatDuration(ms: Long): String {
+        val s = ms / 1000; val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+        return if (h > 0) String.format("%dч %02dм %02dс", h, m, sec) else String.format("%02dм %02dс", m, sec)
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes Б"
+        bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
+        else -> String.format("%.1f МБ", bytes / 1024f / 1024f)
     }
 
     private fun showLogDialog() {
@@ -146,6 +298,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     override fun exitApp() {
+        stopDebugUpdater()
         handler.removeCallbacksAndMessages(null)
         sleepTimer?.cancel()
         player?.release()
@@ -202,6 +355,13 @@ class PlayerActivity : BaseActivity() {
         if (event.action == KeyEvent.ACTION_DOWN) {
             onUserInteraction()
         }
+        if (b.debugPanel.visibility == View.VISIBLE) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
+                hideDebugPanel()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if (b.channelListPanel.visibility == View.VISIBLE) {
             if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                 b.channelListPanel.visibility = View.GONE
@@ -250,6 +410,7 @@ class PlayerActivity : BaseActivity() {
         b.rightControls.visibility = View.GONE
         b.btnSleepTimer.visibility = View.GONE
         b.leftControls.visibility = View.GONE
+        b.btnBug.visibility = View.GONE
         b.channelListRecycler.layoutManager = LinearLayoutManager(this)
         b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
             val idx = urls.indexOf(ch.url)
@@ -266,6 +427,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun startPlayback() {
+        if (b.debugPanel.visibility == View.VISIBLE) hideDebugPanel()
         getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
         val chNum = currentIndex + 1
         val chName = names.getOrNull(currentIndex) ?: "Канал"
@@ -407,6 +569,7 @@ class PlayerActivity : BaseActivity() {
             b.rightControls.visibility = View.GONE
             b.btnSleepTimer.visibility = View.GONE
             b.leftControls.visibility = View.GONE
+            b.btnBug.visibility = View.GONE
             CrashLogger.error("Player", "Не удалось: $details")
         }
     }
@@ -444,6 +607,7 @@ class PlayerActivity : BaseActivity() {
         b.rightControls.visibility = View.VISIBLE
         b.btnSleepTimer.visibility = View.VISIBLE
         b.leftControls.visibility = View.VISIBLE
+        b.btnBug.visibility = View.VISIBLE
         b.btnPlayPause.post { b.btnPlayPause.requestFocus() }
         resetHideTimeout()
     }
@@ -451,6 +615,7 @@ class PlayerActivity : BaseActivity() {
     override fun onDestroy() {
         super.onDestroy()
         CrashLogger.info("Player", "Закрытие")
+        stopDebugUpdater()
         handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
     }
 }
