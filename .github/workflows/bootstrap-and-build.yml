@@ -999,6 +999,108 @@ jobs:
                       android:focusable="true" />
               </LinearLayout>
 
+              <TextView
+                  android:id="@+id/btnBug"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="bottom|end"
+                  android:layout_margin="24dp"
+                  android:background="@drawable/button_focus_bg"
+                  android:paddingHorizontal="14dp"
+                  android:paddingVertical="10dp"
+                  android:text="🐛"
+                  android:textColor="#FF4444"
+                  android:textSize="26sp"
+                  android:clickable="true"
+                  android:focusable="true"
+                  android:visibility="gone" />
+
+              <LinearLayout
+                  android:id="@+id/debugPanel"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="start|top"
+                  android:layout_marginTop="96dp"
+                  android:layout_marginStart="24dp"
+                  android:background="#EE000000"
+                  android:orientation="vertical"
+                  android:padding="16dp"
+                  android:visibility="gone"
+                  android:elevation="12dp">
+                  <TextView
+                      android:id="@+id/debugTitle"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="🐛 Отладка"
+                      android:textColor="#FF4444"
+                      android:textSize="18sp"
+                      android:textStyle="bold"
+                      android:paddingBottom="8dp" />
+                  <ScrollView
+                      android:layout_width="520dp"
+                      android:layout_height="wrap_content"
+                      android:maxHeight="440dp"
+                      android:scrollbars="vertical">
+                      <TextView
+                          android:id="@+id/debugText"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:fontFamily="monospace"
+                          android:textColor="#FFCCCCCC"
+                          android:textSize="11sp"
+                          android:lineSpacingExtra="1dp"
+                          android:textIsSelectable="true" />
+                  </ScrollView>
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:paddingTop="8dp">
+                      <TextView
+                          android:id="@+id/btnDebugCopy"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:background="@drawable/button_focus_bg"
+                          android:gravity="center"
+                          android:padding="10dp"
+                          android:text="📋 Копировать"
+                          android:textColor="#FFFFFFFF"
+                          android:textSize="14sp"
+                          android:textStyle="bold"
+                          android:clickable="true"
+                          android:focusable="true" />
+                      <TextView
+                          android:id="@+id/btnDebugRefresh"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:layout_marginStart="6dp"
+                          android:background="@drawable/button_focus_bg"
+                          android:gravity="center"
+                          android:padding="10dp"
+                          android:text="🔄"
+                          android:textColor="#FFFFFFFF"
+                          android:textSize="14sp"
+                          android:clickable="true"
+                          android:focusable="true" />
+                      <TextView
+                          android:id="@+id/btnDebugClose"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:layout_marginStart="6dp"
+                          android:background="@drawable/button_focus_bg"
+                          android:gravity="center"
+                          android:padding="10dp"
+                          android:text="✕"
+                          android:textColor="#FFFFFFFF"
+                          android:textSize="14sp"
+                          android:clickable="true"
+                          android:focusable="true" />
+                  </LinearLayout>
+              </LinearLayout>
+
               <ProgressBar
                   android:id="@+id/progress"
                   android:layout_width="wrap_content"
@@ -1267,7 +1369,7 @@ jobs:
 
           object CrashLogger {
               private const val LOG_FILE = "app.log"
-              private const val MAX_SIZE = 500 * 1024
+              private const val MAX_SIZE = 200 * 1024
               private var appContext: Context? = null
               private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
@@ -1368,7 +1470,7 @@ jobs:
 
           object ThumbCache {
               private const val PREFS = "thumb_cache"
-              private const val MAX_ENTRIES = 50
+              private const val MAX_ENTRIES = 30
 
               fun get(context: Context, url: String): String? =
                   context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(url, null)
@@ -1466,7 +1568,7 @@ jobs:
           object CacheManager {
               private const val PREFS = "cache_manager"
               private const val KEY_LAST_CLEANUP = "last_cleanup"
-              private const val MIN_INTERVAL_MS = 6 * 60 * 60 * 1000L
+              private const val MIN_INTERVAL_MS = 3 * 60 * 60 * 1000L
 
               fun maybeCleanup(context: Context) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -1513,7 +1615,7 @@ jobs:
 
                       var cacheSize = 0L
                       context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-                      if (cacheSize > 15 * 1024 * 1024) {
+                      if (cacheSize > 8 * 1024 * 1024) {
                           val mb = cacheSize / 1024 / 1024
                           context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                           CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
@@ -1523,14 +1625,14 @@ jobs:
                       var filesSize = 0L
                       context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
                       val filesMb = filesSize / 1024 / 1024
-                      if (filesSize > 50 * 1024 * 1024) {
-                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 50МБ! Аварийная очистка")
+                      if (filesSize > 30 * 1024 * 1024) {
+                          CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ! Аварийная очистка")
                           ChannelCache.clear(context)
                           CrashLogger.clear(context)
                           filesSize = 0L
                           context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-                      } else if (filesSize > 30 * 1024 * 1024) {
-                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ (аномалия)")
+                      } else if (filesSize > 25 * 1024 * 1024) {
+                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 25МБ (аномалия)")
                       }
 
                       val stat = StatFs(context.filesDir.path)
@@ -1680,7 +1782,7 @@ jobs:
               private fun build(context: Context): Dns {
                   val httpClient = OkHttpClient.Builder().build()
                   val doh = try {
-                      val cache = Cache(File(context.cacheDir, "doh_cache"), 10L * 1024 * 1024)
+                      val cache = Cache(File(context.cacheDir, "doh_cache"), 256L * 1024)
                       val bootstrapClient = httpClient.newBuilder().cache(cache).build()
                       DnsOverHttps.Builder()
                           .client(bootstrapClient)
@@ -2096,7 +2198,7 @@ jobs:
           object StreamCache {
               private const val PREFS = "stream_cache"
               private const val TTL_MS = 4 * 60 * 60 * 1000L
-              private const val MAX_ENTRIES = 200
+              private const val MAX_ENTRIES = 120
 
               fun get(context: Context, channelUrl: String): String? {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -2348,6 +2450,7 @@ jobs:
           import coil.ImageLoader
           import coil.ImageLoaderFactory
           import coil.disk.DiskCache
+          import coil.memory.MemoryCache
           import com.tvplayer.app.databinding.ActivityMainBinding
           import kotlinx.coroutines.launch
           import okhttp3.OkHttpClient
@@ -2371,7 +2474,17 @@ jobs:
                       .build()
                   return ImageLoader.Builder(this)
                       .okHttpClient(dohOkHttp)
-                      .diskCache { DiskCache.Builder().directory(cacheDir.resolve("image_cache")).maxSizeBytes(10L * 1024L * 1024L).build() }
+                      .diskCache {
+                          DiskCache.Builder()
+                              .directory(cacheDir.resolve("image_cache"))
+                              .maxSizeBytes(5L * 1024L * 1024L)
+                              .build()
+                      }
+                      .memoryCache {
+                          MemoryCache.Builder(this)
+                              .maxSizeBytes(6L * 1024L * 1024L)
+                              .build()
+                      }
                       .build()
               }
 
@@ -2675,9 +2788,10 @@ jobs:
                       • Панель каналов в плеере (ОК)
                       • Таймер сна (5м – 5ч)
                       • Автовыключение через 4ч без активности
-                      • Умное кэширование + автоочистка (6ч)
+                      • Умное кэширование + автоочистка (3ч)
                       • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
                       • Тумблер DoH + диагностика
+                      • Кнопка 🐛 в плеере — живая телеметрия
                       • Подробный лог
 
                       ⚙️ ТЕХНОЛОГИИ:
@@ -2885,13 +2999,13 @@ jobs:
                       val pythonSize = totalFiles - channelsCacheSize - logSize
 
                       val stats = buildString {
-                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)}")
+                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 5 МБ")
                           appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
-                          appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)}")
-                          appendLine("📝 Лог: ${formatSize(logSize)}")
+                          appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
+                          appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
                           appendLine("🐍 Python: ${formatSize(pythonSize)}")
-                          appendLine("📦 Cache всего: ${formatSize(totalCache)}")
-                          append("💾 Files всего: ${formatSize(totalFiles)}")
+                          appendLine("📦 Cache всего: ${formatSize(totalCache)} / 8 МБ")
+                          append("💾 Files всего: ${formatSize(totalFiles)} / 30 МБ")
                       }
                       b.txtCacheStats.text = stats
                       b.btnClearCache.text = String.format("🗑 Очистить кэш (%s)", formatSize(totalCache))
@@ -2979,6 +3093,7 @@ jobs:
           import com.tvplayer.app.databinding.ActivityPlayerBinding
           import kotlinx.coroutines.launch
           import okhttp3.OkHttpClient
+          import java.io.File
           import java.util.concurrent.TimeUnit
 
           class PlayerActivity : BaseActivity() {
@@ -2995,12 +3110,15 @@ jobs:
               private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
               private val handler = Handler(Looper.getMainLooper())
               private var lastPlayerPosition = -1L
+              private var sessionStartTime = 0L
+              private var debugUpdater: Runnable? = null
 
               private val hideControlsRunnable = Runnable {
                   b.controlsOverlay.visibility = View.GONE
                   b.rightControls.visibility = View.GONE
                   b.btnSleepTimer.visibility = View.GONE
                   b.leftControls.visibility = View.GONE
+                  b.btnBug.visibility = View.GONE
               }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
 
@@ -3041,6 +3159,7 @@ jobs:
                   names = intent.getStringArrayListExtra("names") ?: emptyList()
                   urls = intent.getStringArrayListExtra("urls") ?: emptyList()
                   currentIndex = intent.getIntExtra("index", 0)
+                  sessionStartTime = System.currentTimeMillis()
                   startPlayback()
 
                   b.btnBack.setOnClickListener { finish() }
@@ -3048,6 +3167,18 @@ jobs:
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
                   b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
                   b.btnShowLog.setOnClickListener { showLogDialog() }
+                  b.btnBug.setOnClickListener { showDebugPanel() }
+
+                  b.btnDebugClose.setOnClickListener { hideDebugPanel() }
+                  b.btnDebugRefresh.setOnClickListener {
+                      b.debugText.text = buildDebugText()
+                      Toast.makeText(this, "Обновлено", Toast.LENGTH_SHORT).show()
+                  }
+                  b.btnDebugCopy.setOnClickListener {
+                      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                      clipboard.setPrimaryClip(ClipData.newPlainText("debug", b.debugText.text))
+                      Toast.makeText(this, "Скопировано", Toast.LENGTH_SHORT).show()
+                  }
               }
 
               override fun onResume() {
@@ -3058,6 +3189,141 @@ jobs:
               override fun onPause() {
                   super.onPause()
                   player?.playWhenReady = false
+                  if (b.debugPanel.visibility == View.VISIBLE) hideDebugPanel()
+              }
+
+              private fun showDebugPanel() {
+                  b.debugPanel.visibility = View.VISIBLE
+                  b.controlsOverlay.visibility = View.GONE
+                  b.rightControls.visibility = View.GONE
+                  b.btnSleepTimer.visibility = View.GONE
+                  b.leftControls.visibility = View.GONE
+                  b.btnBug.visibility = View.GONE
+                  b.debugText.text = buildDebugText()
+                  b.btnDebugClose.requestFocus()
+                  startDebugUpdater()
+                  CrashLogger.info("Player", "Открыта debug-панель")
+              }
+
+              private fun hideDebugPanel() {
+                  b.debugPanel.visibility = View.GONE
+                  stopDebugUpdater()
+                  showControls()
+                  CrashLogger.info("Player", "Закрыта debug-панель")
+              }
+
+              private fun startDebugUpdater() {
+                  stopDebugUpdater()
+                  debugUpdater = object : Runnable {
+                      override fun run() {
+                          if (b.debugPanel.visibility != View.VISIBLE) return
+                          b.debugText.text = buildDebugText()
+                          handler.postDelayed(this, 1000)
+                      }
+                  }
+                  handler.postDelayed(debugUpdater!!, 1000)
+              }
+
+              private fun stopDebugUpdater() {
+                  debugUpdater?.let { handler.removeCallbacks(it) }
+                  debugUpdater = null
+              }
+
+              private fun buildDebugText(): String {
+                  val sb = StringBuilder()
+                  val ch = names.getOrNull(currentIndex) ?: "?"
+                  val chUrl = urls.getOrNull(currentIndex) ?: "?"
+                  val cached = StreamCache.get(this, chUrl)
+                  val cacheStatus = if (cached != null) "HIT" else "MISS"
+
+                  sb.appendLine("📺 #${currentIndex + 1}: $ch")
+                  sb.appendLine("  url: ${chUrl.take(50)}")
+                  sb.appendLine("  cache: $cacheStatus")
+                  sb.appendLine()
+
+                  val p = player
+                  if (p != null) {
+                      sb.appendLine("🎬 ПЛЕЕР")
+                      sb.appendLine("  state: ${playerStateName(p.playbackState)}  playing: ${if (p.isPlaying) "▶" else "⏸"}")
+                      val bufDelta = (p.bufferedPosition - p.currentPosition) / 1000.0
+                      sb.appendLine("  pos: ${formatMs(p.currentPosition)}  buffer: +${"%.1f".format(bufDelta)}с")
+                      try {
+                          val tracks = p.currentTracks
+                          val vg = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_VIDEO }
+                          if (vg != null) {
+                              val idx = (0 until vg.length).firstOrNull { vg.isTrackSelected(it) }
+                              if (idx != null) {
+                                  val fmt = vg.getTrackFormat(idx)
+                                  val fps = if (fmt.frameRate > 0) fmt.frameRate.toInt() else 0
+                                  sb.appendLine("  ${fmt.width}×${fmt.height} @${fps}fps · ${fmt.bitrate/1000} kbps")
+                                  sb.appendLine("  video: ${fmt.codecs ?: "?"}")
+                              }
+                          }
+                      } catch (_: Exception) {}
+                      val session = if (sessionStartTime > 0) formatDuration(System.currentTimeMillis() - sessionStartTime) else "?"
+                      sb.appendLine("  retry: $retryCount/$MAX_RETRIES · session: $session")
+                      sb.appendLine()
+                  }
+
+                  sb.appendLine("🌐 СЕТЬ: online=${NetworkUtils.isOnline(this)}")
+                  sb.appendLine()
+
+                  sb.appendLine("🛡 DoH")
+                  sb.appendLine("  enabled: ${DohSettings.isEnabled(this)}")
+                  try {
+                      val m = com.chaquo.python.Python.getInstance().getModule("resolver")
+                      val health = m.callAttr("doh_health").toString()
+                      val resolved = Regex("'doh_resolved':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+                      val fallback = Regex("'system_fallback':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+                      val cooldown = Regex("'cooldown_active':\\s*(True|False)").find(health)?.groupValues?.get(1) == "True"
+                      val cacheSize = Regex("'cache_size':\\s*(\\d+)").find(health)?.groupValues?.get(1) ?: "0"
+                      sb.appendLine("  resolved: $resolved · fb: $fallback · cache: $cacheSize")
+                      sb.appendLine("  circuit: ${if (cooldown) "COOLDOWN" else "OK"}")
+                  } catch (_: Exception) { sb.appendLine("  python: error") }
+                  sb.appendLine()
+
+                  sb.appendLine("💾 КЭШ")
+                  val streamPrefs = getSharedPreferences("stream_cache", MODE_PRIVATE)
+                  sb.appendLine("  stream: ${streamPrefs.all.size}/120")
+                  val thumbPrefs = getSharedPreferences("thumb_cache", MODE_PRIVATE)
+                  sb.appendLine("  thumb: ${thumbPrefs.all.size}/30")
+                  val coilDisk = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                  sb.appendLine("  coil: ${formatBytes(coilDisk)} / 5 МБ")
+                  val logFile = File(filesDir, "app.log")
+                  sb.appendLine("  log: ${formatBytes(if (logFile.exists()) logFile.length() else 0L)} / 200 КБ")
+                  val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                  sb.appendLine("  files: ${formatBytes(totalFiles)} / 30 МБ")
+                  sb.appendLine()
+
+                  sb.appendLine("📦 v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                  sb.appendLine("  ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                  sb.appendLine("  Android ${android.os.Build.VERSION.RELEASE}")
+
+                  return sb.toString()
+              }
+
+              private fun playerStateName(state: Int): String = when (state) {
+                  Player.STATE_IDLE -> "IDLE"
+                  Player.STATE_BUFFERING -> "BUFFERING"
+                  Player.STATE_READY -> "READY"
+                  Player.STATE_ENDED -> "ENDED"
+                  else -> "?"
+              }
+
+              private fun formatMs(ms: Long): String {
+                  val s = ms / 1000; val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+                  return String.format("%02d:%02d:%02d", h, m, sec)
+              }
+
+              private fun formatDuration(ms: Long): String {
+                  val s = ms / 1000; val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+                  return if (h > 0) String.format("%dч %02dм %02dс", h, m, sec) else String.format("%02dм %02dс", m, sec)
+              }
+
+              private fun formatBytes(bytes: Long): String = when {
+                  bytes < 1024 -> "$bytes Б"
+                  bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
+                  else -> String.format("%.1f МБ", bytes / 1024f / 1024f)
               }
 
               private fun showLogDialog() {
@@ -3094,6 +3360,7 @@ jobs:
               }
 
               override fun exitApp() {
+                  stopDebugUpdater()
                   handler.removeCallbacksAndMessages(null)
                   sleepTimer?.cancel()
                   player?.release()
@@ -3150,6 +3417,13 @@ jobs:
                   if (event.action == KeyEvent.ACTION_DOWN) {
                       onUserInteraction()
                   }
+                  if (b.debugPanel.visibility == View.VISIBLE) {
+                      if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
+                          hideDebugPanel()
+                          return true
+                      }
+                      return super.dispatchKeyEvent(event)
+                  }
                   if (b.channelListPanel.visibility == View.VISIBLE) {
                       if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
                           b.channelListPanel.visibility = View.GONE
@@ -3198,6 +3472,7 @@ jobs:
                   b.rightControls.visibility = View.GONE
                   b.btnSleepTimer.visibility = View.GONE
                   b.leftControls.visibility = View.GONE
+                  b.btnBug.visibility = View.GONE
                   b.channelListRecycler.layoutManager = LinearLayoutManager(this)
                   b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
                       val idx = urls.indexOf(ch.url)
@@ -3214,6 +3489,7 @@ jobs:
               }
 
               private fun startPlayback() {
+                  if (b.debugPanel.visibility == View.VISIBLE) hideDebugPanel()
                   getSharedPreferences("tvplayer", MODE_PRIVATE).edit().putInt("last_channel", currentIndex).apply()
                   val chNum = currentIndex + 1
                   val chName = names.getOrNull(currentIndex) ?: "Канал"
@@ -3355,6 +3631,7 @@ jobs:
                       b.rightControls.visibility = View.GONE
                       b.btnSleepTimer.visibility = View.GONE
                       b.leftControls.visibility = View.GONE
+                      b.btnBug.visibility = View.GONE
                       CrashLogger.error("Player", "Не удалось: $details")
                   }
               }
@@ -3392,6 +3669,7 @@ jobs:
                   b.rightControls.visibility = View.VISIBLE
                   b.btnSleepTimer.visibility = View.VISIBLE
                   b.leftControls.visibility = View.VISIBLE
+                  b.btnBug.visibility = View.VISIBLE
                   b.btnPlayPause.post { b.btnPlayPause.requestFocus() }
                   resetHideTimeout()
               }
@@ -3399,6 +3677,7 @@ jobs:
               override fun onDestroy() {
                   super.onDestroy()
                   CrashLogger.info("Player", "Закрытие")
+                  stopDebugUpdater()
                   handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null
               }
           }
@@ -3450,38 +3729,33 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🛡 **Новое в этой сборке**
+            🐛 **Новое: кнопка отладки в плеере**
 
-            **Стелс (меньше запросов к VK):**
-            - Стабильный `X-From-Id` (один на устройство)
-            - Кэш миниатюр (`ThumbCache`, лимит 50)
-            - `ChannelCache` TTL 24ч/48ч
-            - `StreamCache` TTL 4ч
-            - Не ретраить нефатальные ошибки (мёртвый канал = 1 запрос)
-            - Exponential backoff 2–32с
-            - Coil `size(120) + INEXACT`
+            В правом нижнем углу при появлении контролов — красный 🐛.
+            Нажми → панель **слева сверху** с живой телеметрией (1 раз/сек):
 
-            **Кэш и автоочистка:**
-            - `CacheManager` раз в 6ч при `onResume`
-            - `ThumbCache` с лимитом 50
-            - Потолок данных ~22 МБ
+            - 📺 Канал, URL, кэш HIT/MISS
+            - 🎬 Состояние плеера, позиция, буфер, разрешение, fps, битрейт, кодек, retry, uptime сессии
+            - 🌐 Онлайн, DoH: resolved/fallback/cache, circuit breaker
+            - 💾 Размеры всех кэшей с лимитами
+            - 📦 Версия, устройство, Android
 
-            **Автовыключение:**
-            - 4ч без активности → полный выход
+            **Кнопки:** 📋 Копировать · 🔄 Обновить · ✕ Закрыть
+            Живое обновление раз в секунду. Закрывается по BACK, смене канала или сворачиванию.
 
-            **Стабильность:**
-            - Stall checker (перерезолв при зависании)
-            - `onPause`/`onResume` плеера
-            - `_doh_slow_count` сброс
-            - `callTimeout(5с)` диагностики
-            - `readConfig()` try/catch
-            - `btnFavFilter` правильные цвета
-            - `progress.VISIBLE` при «Обновить»
+            💾 **Минимальный кэш (для Mi Box 2, 2 ГБ RAM):**
 
-            **Мелочи:**
-            - `versionName` = номер сборки
-            - Убран мёртвый `<service .PlaybackService>`
-            - `setup-java@v5`
+            | Кэш | Лимит |
+            |---|---|
+            | Coil disk | 5 МБ |
+            | Coil memory | 6 МБ |
+            | DoH cache | 256 КБ |
+            | Log | 200 КБ |
+            | Stream cache | 120 записей |
+            | Thumb cache | 30 записей |
+            | CacheManager | 3ч, порог 8/30 МБ |
+
+            **Потолок: ~26 МБ диска, ~8 МБ RAM. Никогда не растёт.**
 
             📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
