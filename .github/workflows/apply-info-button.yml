@@ -149,7 +149,7 @@ jobs:
 
           # 7. Обработчик клика кнопки (после btnAspect.setOnClickListener)
           ok += ins_after(
-              'b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }',
+              'b.btnAspect.setOnClickListener { toggleAspect() }',
               'b.btnInfo.setOnClickListener { toggleInfo(); resetHideTimeout() }',
               "btnInfo-click")
 
