@@ -5,7 +5,7 @@ on:
 
 permissions:
   contents: write
-workflows: write
+  workflows: write
 
 jobs:
   patch:
@@ -51,11 +51,29 @@ jobs:
               t = t[:le+1] + "".join(sp + ln + "\n" for ln in block.split("\n")) + t[le+1:]
               return True
 
-          # 1-2. Кэш
+          # 1-2. Кэш картинок 10→5 МБ, превью 120→100
           ok += rep("maxSizeBytes(10L * 1024L * 1024L)", "maxSizeBytes(5L * 1024L * 1024L)", "coil-cache")
           ok += rep("size(120, 120)", "size(100, 100)", "thumb-size")
 
-          # 3. infoPanel в layout (перед </FrameLayout>)
+          # 3. resolver: сброс cooldown при включении DoH
+          ok += rep(
+              "def set_doh_enabled(enabled):\n"
+              "    global _doh_enabled, _doh_slow_count, _doh_consecutive_fails\n"
+              "    _doh_enabled = bool(enabled)\n"
+              "    if not _doh_enabled:\n"
+              "        DNS_CACHE.clear()\n"
+              "        _doh_slow_count = 0\n"
+              "        _doh_consecutive_fails = 0",
+              "def set_doh_enabled(enabled):\n"
+              "    global _doh_enabled, _doh_slow_count, _doh_consecutive_fails, _doh_fail_until\n"
+              "    _doh_enabled = bool(enabled)\n"
+              "    DNS_CACHE.clear()\n"
+              "    _doh_slow_count = 0\n"
+              "    _doh_consecutive_fails = 0\n"
+              "    _doh_fail_until = 0.0",
+              "resolver-cooldown")
+
+          # 4. infoPanel в layout плеера (перед </FrameLayout>)
           ok += ins_before("</FrameLayout>",
               '<LinearLayout\n'
               'android:id="@+id/infoPanel"\n'
@@ -88,7 +106,7 @@ jobs:
               'android:visibility="gone" />\n'
               '</LinearLayout>', "layout-infoPanel")
 
-          # 4. Кнопка 🐞 в rightControls (после btnAspect)
+          # 5. Кнопка 🐞 в rightControls (после btnAspect)
           ok += ins_after(
               'android:id="@+id/btnAspect"',
               '<TextView\n'
@@ -106,7 +124,7 @@ jobs:
               'android:clickable="true"\n'
               'android:focusable="true" />', "btnInfo-layout")
 
-          # 5. Поля в PlayerActivity (после hideChannelOverlayRunnable)
+          # 6. Поля PlayerActivity (после hideChannelOverlayRunnable)
           ok += ins_after(
               'private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }',
               'private var infoExtended = false\n'
@@ -119,7 +137,7 @@ jobs:
               '    }\n'
               '}', "player-fields")
 
-          # 6. Методы (перед updateQualityButton)
+          # 7. Методы инфо-оверлея (перед updateQualityButton)
           ok += ins_before('private fun updateQualityButton(tracks: Tracks) {',
               'private fun toggleInfo() {\n'
               '    infoExtended = !infoExtended\n'
@@ -148,40 +166,40 @@ jobs:
               '    b.txtInfoExtra.visibility = View.VISIBLE\n'
               '}', "player-methods")
 
-          # 7. Обработчик клика кнопки (после btnAspect.setOnClickListener)
+          # 8. Обработчик клика btnInfo (после btnAspect.setOnClickListener)
           ok += ins_after(
-              'b.btnAspect.setOnClickListener { toggleAspect() }',
+              'b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }',
               'b.btnInfo.setOnClickListener { toggleInfo(); resetHideTimeout() }',
               "btnInfo-click")
 
-          # 8. Фокус на кнопке (в setupFocusHighlight, добавить btnInfo)
+          # 9. btnInfo в setupFocusHighlight
           ok += rep(
               'listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->',
               'listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnInfo, b.btnBack, b.btnExitApp).forEach { tv ->',
               "focus-highlight")
 
-          # 9. Показать инфо при старте (перед stallChecker)
+          # 10. Показ инфо при старте playback (перед stallChecker)
           ok += ins_before('handler.postDelayed(stallChecker, 30_000)',
               'b.infoPanel.visibility = View.VISIBLE\n'
               'handler.removeCallbacks(hideInfo)\n'
               'handler.postDelayed(hideInfo, 4000)\n'
               'updateInfoPanel()', "play-showinfo")
 
-          # 10. Обновлять инфо при смене дорожек
+          # 11. Обновление инфо при смене дорожек
           ok += ins_after(
               'updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE',
               'updateInfoPanel()', "tracks-info")
 
-          # 11. Очистка в onDestroy
+          # 12. Очистка infoTick в onDestroy
           ok += rep(
               'handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null',
               'handler.removeCallbacks(infoTick); handler.removeCallbacksAndMessages(null); sleepTimer?.cancel(); player?.release(); player = null',
               "ondestroy-info")
 
-          print(f"✅ Применено правок: {ok}/11")
+          print(f"✅ Применено правок: {ok}/12")
           if miss:
               print("⚠️ Не найдено:", ", ".join(miss))
-          if ok < 8:
+          if ok < 9:
               print("❌ Слишком много пропусков — файл НЕ изменён"); sys.exit(1)
           p.write_text(t, encoding="utf-8")
           print("📄 bootstrap-and-build.yml обновлён")
@@ -195,5 +213,5 @@ jobs:
           if git diff --staged --quiet; then
             echo "Изменений нет"; exit 0
           fi
-          git commit -m "feat: info button 🐞 + cache 5MB + thumb 100px"
+          git commit -m "feat: info button 🐞 + cache 5MB + thumb 100px + cooldown fix"
           git push
