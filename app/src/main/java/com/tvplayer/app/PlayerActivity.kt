@@ -32,6 +32,7 @@ import com.tvplayer.app.databinding.ActivityPlayerBinding
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
+import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 class PlayerActivity : BaseActivity() {
@@ -59,6 +60,15 @@ class PlayerActivity : BaseActivity() {
         b.btnBug.visibility = View.GONE
     }
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
+    private val showBufferingRunnable = Runnable {
+        if (player?.playbackState == Player.STATE_BUFFERING) {
+            b.bufferingText.visibility = View.VISIBLE
+        }
+    }
+    private val hideBufferingRunnable = Runnable {
+        b.bufferingText.visibility = View.GONE
+    }
 
     private val stallChecker = object : Runnable {
         override fun run() {
@@ -128,6 +138,13 @@ class PlayerActivity : BaseActivity() {
         super.onPause()
         player?.playWhenReady = false
         if (b.debugPanel.visibility == View.VISIBLE) hideDebugPanel()
+    }
+
+    private fun currentClock(): String {
+        val cal = Calendar.getInstance()
+        val h = cal.get(Calendar.HOUR_OF_DAY)
+        val m = cal.get(Calendar.MINUTE)
+        return String.format("%02d:%02d", h, m)
     }
 
     private fun showDebugPanel() {
@@ -432,11 +449,12 @@ class PlayerActivity : BaseActivity() {
         val chNum = currentIndex + 1
         val chName = names.getOrNull(currentIndex) ?: "Канал"
         CrashLogger.info("Player", "Открытие #$chNum: $chName")
-        b.channelNameOverlay.text = "$chNum. $chName"
+        b.channelNameOverlay.text = "$chNum. $chName  ·  ${currentClock()}"
         b.channelNameOverlay.visibility = View.VISIBLE
         handler.removeCallbacks(hideChannelOverlayRunnable)
         handler.postDelayed(hideChannelOverlayRunnable, 3000)
         b.errorLayout.visibility = View.GONE
+        b.bufferingText.visibility = View.GONE
         val channelUrl = urls.getOrNull(currentIndex) ?: return
         val cached = StreamCache.get(this, channelUrl)
         if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
@@ -483,6 +501,8 @@ class PlayerActivity : BaseActivity() {
     private fun play(m3u8: String) {
         player?.release()
         handler.removeCallbacks(stallChecker)
+        handler.removeCallbacks(showBufferingRunnable)
+        handler.removeCallbacks(hideBufferingRunnable)
         lastPlayerPosition = -1L
         val dataSource = buildHttpDataSource()
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
@@ -491,6 +511,18 @@ class PlayerActivity : BaseActivity() {
             setMediaSource(HlsMediaSource.Factory(dataSource).createMediaSource(MediaItem.fromUri(m3u8)))
             playWhenReady = true; prepare()
             addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    when (state) {
+                        Player.STATE_BUFFERING -> {
+                            handler.removeCallbacks(hideBufferingRunnable)
+                            handler.postDelayed(showBufferingRunnable, 500)
+                        }
+                        Player.STATE_READY, Player.STATE_ENDED, Player.STATE_IDLE -> {
+                            handler.removeCallbacks(showBufferingRunnable)
+                            b.bufferingText.visibility = View.GONE
+                        }
+                    }
+                }
                 override fun onTracksChanged(tracks: Tracks) {
                     updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE
                     CrashLogger.info("Player", "Воспроизведение началось")
@@ -498,6 +530,7 @@ class PlayerActivity : BaseActivity() {
                 override fun onPlayerError(error: PlaybackException) {
                     super.onPlayerError(error)
                     CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})")
+                    b.bufferingText.visibility = View.GONE
                     urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
                     handleError("Ошибка плеера: ${error.errorCodeName}")
                 }
@@ -553,6 +586,8 @@ class PlayerActivity : BaseActivity() {
 
     private fun handleError(errorText: String? = null, allowRetry: Boolean = true) {
         handler.removeCallbacks(stallChecker)
+        handler.removeCallbacks(showBufferingRunnable)
+        b.bufferingText.visibility = View.GONE
         if (allowRetry && retryCount < MAX_RETRIES) {
             retryCount++
             val delay = RETRY_DELAY * (1L shl (retryCount - 1))

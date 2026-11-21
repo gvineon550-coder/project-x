@@ -45,12 +45,12 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(5 * 1024 * 1024)
+                    .maxSizeBytes(5L * 1024L * 1024L)
                     .build()
             }
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizeBytes(6L * 1024L * 1024L)
+                    .maxSizeBytes(6 * 1024 * 1024)
                     .build()
             }
             .build()
