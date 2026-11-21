@@ -2477,7 +2477,7 @@ jobs:
                       .diskCache {
                           DiskCache.Builder()
                               .directory(cacheDir.resolve("image_cache"))
-                              .maxSizeBytes(5L * 1024L * 1024L)
+                              .maxSizeBytes(5 * 1024 * 1024)
                               .build()
                       }
                       .memoryCache {
