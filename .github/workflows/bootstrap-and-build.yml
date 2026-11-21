@@ -888,6 +888,20 @@ jobs:
                   android:textStyle="bold"
                   android:visibility="gone" />
 
+              <TextView
+                  android:id="@+id/bufferingText"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_gravity="center"
+                  android:background="#AA000000"
+                  android:paddingHorizontal="24dp"
+                  android:paddingVertical="12dp"
+                  android:text="⏳ Загрузка потока…"
+                  android:textColor="#FFFFFFFF"
+                  android:textSize="16sp"
+                  android:textStyle="bold"
+                  android:visibility="gone" />
+
               <LinearLayout
                   android:id="@+id/controlsOverlay"
                   android:layout_width="match_parent"
@@ -2477,12 +2491,12 @@ jobs:
                       .diskCache {
                           DiskCache.Builder()
                               .directory(cacheDir.resolve("image_cache"))
-                              .maxSizeBytes(5 * 1024 * 1024)
+                              .maxSizeBytes(5L * 1024L * 1024L)
                               .build()
                       }
                       .memoryCache {
                           MemoryCache.Builder(this)
-                              .maxSizeBytes(6L * 1024L * 1024L)
+                              .maxSizeBytes(6 * 1024 * 1024)
                               .build()
                       }
                       .build()
@@ -2792,6 +2806,7 @@ jobs:
                       • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
                       • Тумблер DoH + диагностика
                       • Кнопка 🐛 в плеере — живая телеметрия
+                      • Индикатор буферизации + часы на оверлее
                       • Подробный лог
 
                       ⚙️ ТЕХНОЛОГИИ:
@@ -3094,6 +3109,7 @@ jobs:
           import kotlinx.coroutines.launch
           import okhttp3.OkHttpClient
           import java.io.File
+          import java.util.Calendar
           import java.util.concurrent.TimeUnit
 
           class PlayerActivity : BaseActivity() {
@@ -3121,6 +3137,15 @@ jobs:
                   b.btnBug.visibility = View.GONE
               }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
+
+              private val showBufferingRunnable = Runnable {
+                  if (player?.playbackState == Player.STATE_BUFFERING) {
+                      b.bufferingText.visibility = View.VISIBLE
+                  }
+              }
+              private val hideBufferingRunnable = Runnable {
+                  b.bufferingText.visibility = View.GONE
+              }
 
               private val stallChecker = object : Runnable {
                   override fun run() {
@@ -3190,6 +3215,13 @@ jobs:
                   super.onPause()
                   player?.playWhenReady = false
                   if (b.debugPanel.visibility == View.VISIBLE) hideDebugPanel()
+              }
+
+              private fun currentClock(): String {
+                  val cal = Calendar.getInstance()
+                  val h = cal.get(Calendar.HOUR_OF_DAY)
+                  val m = cal.get(Calendar.MINUTE)
+                  return String.format("%02d:%02d", h, m)
               }
 
               private fun showDebugPanel() {
@@ -3494,11 +3526,12 @@ jobs:
                   val chNum = currentIndex + 1
                   val chName = names.getOrNull(currentIndex) ?: "Канал"
                   CrashLogger.info("Player", "Открытие #$chNum: $chName")
-                  b.channelNameOverlay.text = "$chNum. $chName"
+                  b.channelNameOverlay.text = "$chNum. $chName  ·  ${currentClock()}"
                   b.channelNameOverlay.visibility = View.VISIBLE
                   handler.removeCallbacks(hideChannelOverlayRunnable)
                   handler.postDelayed(hideChannelOverlayRunnable, 3000)
                   b.errorLayout.visibility = View.GONE
+                  b.bufferingText.visibility = View.GONE
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
                   if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
@@ -3545,6 +3578,8 @@ jobs:
               private fun play(m3u8: String) {
                   player?.release()
                   handler.removeCallbacks(stallChecker)
+                  handler.removeCallbacks(showBufferingRunnable)
+                  handler.removeCallbacks(hideBufferingRunnable)
                   lastPlayerPosition = -1L
                   val dataSource = buildHttpDataSource()
                   val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
@@ -3553,6 +3588,18 @@ jobs:
                       setMediaSource(HlsMediaSource.Factory(dataSource).createMediaSource(MediaItem.fromUri(m3u8)))
                       playWhenReady = true; prepare()
                       addListener(object : Player.Listener {
+                          override fun onPlaybackStateChanged(state: Int) {
+                              when (state) {
+                                  Player.STATE_BUFFERING -> {
+                                      handler.removeCallbacks(hideBufferingRunnable)
+                                      handler.postDelayed(showBufferingRunnable, 500)
+                                  }
+                                  Player.STATE_READY, Player.STATE_ENDED, Player.STATE_IDLE -> {
+                                      handler.removeCallbacks(showBufferingRunnable)
+                                      b.bufferingText.visibility = View.GONE
+                                  }
+                              }
+                          }
                           override fun onTracksChanged(tracks: Tracks) {
                               updateQualityButton(tracks); retryCount = 0; b.progress.visibility = View.GONE
                               CrashLogger.info("Player", "Воспроизведение началось")
@@ -3560,6 +3607,7 @@ jobs:
                           override fun onPlayerError(error: PlaybackException) {
                               super.onPlayerError(error)
                               CrashLogger.error("Player", "Ошибка: ${error.errorCodeName} (${error.errorCode})")
+                              b.bufferingText.visibility = View.GONE
                               urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
                               handleError("Ошибка плеера: ${error.errorCodeName}")
                           }
@@ -3615,6 +3663,8 @@ jobs:
 
               private fun handleError(errorText: String? = null, allowRetry: Boolean = true) {
                   handler.removeCallbacks(stallChecker)
+                  handler.removeCallbacks(showBufferingRunnable)
+                  b.bufferingText.visibility = View.GONE
                   if (allowRetry && retryCount < MAX_RETRIES) {
                       retryCount++
                       val delay = RETRY_DELAY * (1L shl (retryCount - 1))
@@ -3729,33 +3779,26 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🐛 **Новое: кнопка отладки в плеере**
+            🔧 **Исправления и улучшения**
 
-            В правом нижнем углу при появлении контролов — красный 🐛.
-            Нажми → панель **слева сверху** с живой телеметрией (1 раз/сек):
+            **Фиксы:**
+            - `MemoryCache.Builder.maxSizeBytes(6 * 1024 * 1024)` — убран `Long`, теперь `Int` (компиляция проходит)
+            - Убран мёртвый `<service .PlaybackService>` из манифеста
 
-            - 📺 Канал, URL, кэш HIT/MISS
-            - 🎬 Состояние плеера, позиция, буфер, разрешение, fps, битрейт, кодек, retry, uptime сессии
-            - 🌐 Онлайн, DoH: resolved/fallback/cache, circuit breaker
-            - 💾 Размеры всех кэшей с лимитами
-            - 📦 Версия, устройство, Android
+            **Новые фичи (пункты 3 и 4):**
+            - **Индикатор «⏳ Загрузка потока…»** — появляется через 500мс после `STATE_BUFFERING`, скрывается при `STATE_READY`. Защита от мигания при быстром старте.
+            - **Часы `HH:mm`** в оверлее канала — при переключении видно текущее время рядом с именем.
 
-            **Кнопки:** 📋 Копировать · 🔄 Обновить · ✕ Закрыть
-            Живое обновление раз в секунду. Закрывается по BACK, смене канала или сворачиванию.
-
-            💾 **Минимальный кэш (для Mi Box 2, 2 ГБ RAM):**
-
-            | Кэш | Лимит |
-            |---|---|
-            | Coil disk | 5 МБ |
-            | Coil memory | 6 МБ |
-            | DoH cache | 256 КБ |
-            | Log | 200 КБ |
-            | Stream cache | 120 записей |
-            | Thumb cache | 30 записей |
-            | CacheManager | 3ч, порог 8/30 МБ |
-
-            **Потолок: ~26 МБ диска, ~8 МБ RAM. Никогда не растёт.**
+            **Из прошлых версий:**
+            - 🐛 кнопка отладки (телеметрия 1раз/сек)
+            - DoH AdGuard + тумблер + диагностика
+            - Минимальный кэш (5/6/256/200, 120/30)
+            - Автовыключение 4ч без активности
+            - Stall checker
+            - Stealth (X-From-Id, ThumbCache)
+            - Exponential backoff
+            - `versionName` = номер сборки
+            - `setup-java@v5`
 
             📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
