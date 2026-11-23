@@ -7,6 +7,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.View
 import android.widget.Toast
@@ -24,6 +26,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.json.JSONObject
 import java.io.File
+import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 class MainActivity : BaseActivity(), ImageLoaderFactory {
@@ -33,6 +36,14 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
     private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
     private var backPressedTime: Long = 0
     private var needScrollOnResume = false
+    private val clockHandler = Handler(Looper.getMainLooper())
+    private val clockRunnable = object : Runnable {
+        override fun run() {
+            val cal = Calendar.getInstance()
+            b.txtClock.text = String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+            clockHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun newImageLoader(): ImageLoader {
         val dohOkHttp = OkHttpClient.Builder()
@@ -65,17 +76,22 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         b.btnRefresh.setOnClickListener {
             CrashLogger.info("UI", "Кнопка Обновить")
             b.progress.visibility = View.VISIBLE
+            b.errorLayout.visibility = View.GONE
             loadFromNetwork(forceRefresh = true)
         }
         b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
         b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
+        b.btnRetryMain.setOnClickListener {
+            b.errorLayout.visibility = View.GONE
+            b.progress.visibility = View.VISIBLE
+            loadFromNetwork(forceRefresh = true)
+        }
 
         b.btnFavFilter.nextFocusDownId = R.id.recycler
         b.btnRefresh.nextFocusDownId = R.id.recycler
         b.btnCheckUpdates.nextFocusDownId = R.id.recycler
         b.btnSettings.nextFocusDownId = R.id.recycler
-        b.error.setOnClickListener { showLogDialog() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -90,6 +106,7 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         })
 
         loadInitial()
+        clockHandler.post(clockRunnable)
     }
 
     override fun onResume() {
@@ -97,6 +114,24 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         if (needScrollOnResume && allChannels.isNotEmpty()) {
             needScrollOnResume = false
             b.recycler.postDelayed({ scrollToLastChannel() }, 200)
+        }
+    }
+
+    override fun onDestroy() {
+        clockHandler.removeCallbacks(clockRunnable)
+        super.onDestroy()
+    }
+
+    private fun humanError(code: String, detail: String): String {
+        return when {
+            code.contains("NO_NETWORK") -> "📡 Нет подключения к интернету"
+            code.contains("TIMEOUT") -> "⏱ Сервер VK не отвечает"
+            code.contains("HTTP_403") -> "🚫 Канал недоступен (VK: 403)"
+            code.contains("HTTP_404") -> "🚫 Канал не найден (VK: 404)"
+            code.contains("NO_M3U8") -> "🔍 Не удалось найти поток"
+            code.contains("PARSE_ERROR") -> "📄 VK вернул некорректный ответ"
+            code.contains("VK_OFFLINE") -> "📺 Канал сейчас не транслируется"
+            else -> detail
         }
     }
 
@@ -134,8 +169,8 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
             b.progress.visibility = View.GONE
             if (allChannels.isEmpty()) {
                 b.recycler.visibility = View.GONE
-                b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
-                b.error.visibility = View.VISIBLE
+                b.error.text = humanError("NO_NETWORK", "Нет подключения к интернету.")
+                b.errorLayout.visibility = View.VISIBLE
             }
             return
         }
@@ -180,14 +215,14 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
                         updateView(scrollToLast = forceRefresh)
                     }
                 } else {
-                    b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."
-                    b.error.visibility = View.VISIBLE
+                    b.error.text = "Не удалось загрузить каналы."
+                    b.errorLayout.visibility = View.VISIBLE
                     CrashLogger.error("MainActivity", "Пустой список каналов")
                 }
             } catch (e: Exception) {
                 b.progress.visibility = View.GONE
                 b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"
-                b.error.visibility = View.VISIBLE
+                b.errorLayout.visibility = View.VISIBLE
                 CrashLogger.error("MainActivity", "Исключение при загрузке", e)
             }
         }
@@ -262,7 +297,7 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
     private fun updateView(scrollToLast: Boolean = false) {
         if (allChannels.isEmpty()) return
         b.progress.visibility = View.GONE
-        b.error.visibility = View.GONE
+        b.errorLayout.visibility = View.GONE
         val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
         allChannels.forEach { it.isFavorite = favs.contains(it.url) }
         val sorted = allChannels.sortedByDescending { it.isFavorite }

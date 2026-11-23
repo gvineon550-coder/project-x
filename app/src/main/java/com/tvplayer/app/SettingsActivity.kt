@@ -38,10 +38,10 @@ class SettingsActivity : BaseActivity() {
             • Панель каналов в плеере (ОК)
             • Таймер сна (5м – 5ч)
             • Автовыключение через 4ч без активности
-            • Умное кэширование + автоочистка (3ч)
+            • Умное кэширование + автоочистка (3ч / >15МБ)
             • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
             • Тумблер DoH + диагностика
-            • Кнопка 🐛 в плеере — живая телеметрия
+            • Кнопка 🐛 в плеере (навигация пультом)
             • Индикатор буферизации + часы на оверлее
             • Подробный лог
 
@@ -255,7 +255,7 @@ class SettingsActivity : BaseActivity() {
                 appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
                 appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
                 appendLine("🐍 Python: ${formatSize(pythonSize)}")
-                appendLine("📦 Cache всего: ${formatSize(totalCache)} / 8 МБ")
+                appendLine("📦 Cache всего: ${formatSize(totalCache)} / 10 МБ")
                 append("💾 Files всего: ${formatSize(totalFiles)} / 30 МБ")
             }
             b.txtCacheStats.text = stats

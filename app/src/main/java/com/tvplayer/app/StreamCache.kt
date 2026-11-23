@@ -3,7 +3,7 @@ import android.content.Context
 
 object StreamCache {
     private const val PREFS = "stream_cache"
-    private const val TTL_MS = 4 * 60 * 60 * 1000L
+    private const val TTL_MS = 6 * 60 * 60 * 1000L
     private const val MAX_ENTRIES = 120
 
     fun get(context: Context, channelUrl: String): String? {

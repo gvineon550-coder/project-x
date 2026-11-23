@@ -7,12 +7,17 @@ object CacheManager {
     private const val PREFS = "cache_manager"
     private const val KEY_LAST_CLEANUP = "last_cleanup"
     private const val MIN_INTERVAL_MS = 3 * 60 * 60 * 1000L
+    private const val FORCE_CLEANUP_THRESHOLD = 15 * 1024 * 1024
 
     fun maybeCleanup(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val last = prefs.getLong(KEY_LAST_CLEANUP, 0L)
         val now = System.currentTimeMillis()
-        if (now - last < MIN_INTERVAL_MS) return
+
+        var currentCacheSize = 0L
+        context.cacheDir.walkTopDown().forEach { if (it.isFile) currentCacheSize += it.length() }
+
+        if (now - last < MIN_INTERVAL_MS && currentCacheSize < FORCE_CLEANUP_THRESHOLD) return
         prefs.edit().putLong(KEY_LAST_CLEANUP, now).apply()
         Thread { performCleanup(context.applicationContext) }
             .apply { name = "CacheCleanup"; isDaemon = true }.start()
@@ -53,7 +58,7 @@ object CacheManager {
 
             var cacheSize = 0L
             context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-            if (cacheSize > 8 * 1024 * 1024) {
+            if (cacheSize > 10 * 1024 * 1024) {
                 val mb = cacheSize / 1024 / 1024
                 context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                 CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")

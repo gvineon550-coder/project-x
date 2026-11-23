@@ -69,6 +69,15 @@
             android:focusable="true"
             android:clickable="true"
             android:background="?attr/selectableItemBackground" />
+        <TextView
+            android:id="@+id/txtClock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="--:--"
+            android:textColor="#FF8A8D93"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingStart="12dp" />
     </LinearLayout>
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler"
@@ -88,20 +97,40 @@
         app:layout_constraintBottom_toBottomOf="@id/recycler"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
-    <TextView
-        android:id="@+id/error"
+    <LinearLayout
+        android:id="@+id/errorLayout"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:padding="24dp"
+        android:layout_gravity="center"
         android:gravity="center"
-        android:textColor="#FFFF6B6B"
-        android:textSize="14sp"
-        android:lineSpacingExtra="3dp"
-        android:clickable="true"
-        android:focusable="true"
+        android:orientation="vertical"
+        android:padding="24dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/recycler"
         app:layout_constraintBottom_toBottomOf="@id/recycler"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent">
+        <TextView
+            android:id="@+id/error"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="#FFFF6B6B"
+            android:textSize="14sp"
+            android:lineSpacingExtra="3dp" />
+        <TextView
+            android:id="@+id/btnRetryMain"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/button_accent_bg"
+            android:paddingHorizontal="32dp"
+            android:paddingVertical="12dp"
+            android:text="Повторить"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:focusable="true"
+            android:clickable="true" />
+    </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

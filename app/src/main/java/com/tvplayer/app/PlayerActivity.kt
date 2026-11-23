@@ -44,6 +44,7 @@ class PlayerActivity : BaseActivity() {
     private var urls: List<String> = emptyList()
     private var currentIndex: Int = 0
     private var retryCount = 0
+    private var hasBeenReady = false
     private val MAX_RETRIES = 5
     private val RETRY_DELAY = 2000L
     private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -62,7 +63,7 @@ class PlayerActivity : BaseActivity() {
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
 
     private val showBufferingRunnable = Runnable {
-        if (player?.playbackState == Player.STATE_BUFFERING) {
+        if (player?.playbackState == Player.STATE_BUFFERING && !hasBeenReady) {
             b.bufferingText.visibility = View.VISIBLE
         }
     }
@@ -83,7 +84,7 @@ class PlayerActivity : BaseActivity() {
                 CrashLogger.info("Player", "Стоп-кадр на ${pos}мс — перерезолв")
                 urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
                 handler.removeCallbacks(this)
-                handleError("Поток замер")
+                handleError("ERROR[STALL]: Поток замер")
                 return
             }
             lastPlayerPosition = pos
@@ -112,7 +113,7 @@ class PlayerActivity : BaseActivity() {
 
         b.btnBack.setOnClickListener { finish() }
         b.btnExitApp.setOnClickListener { exitApp() }
-        b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+        b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; hasBeenReady = false; startPlayback() }
         b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
         b.btnShowLog.setOnClickListener { showLogDialog() }
         b.btnBug.setOnClickListener { showDebugPanel() }
@@ -257,6 +258,20 @@ class PlayerActivity : BaseActivity() {
         return sb.toString()
     }
 
+    private fun humanError(code: String, detail: String): String {
+        return when {
+            code.contains("NO_NETWORK") -> "📡 Нет подключения к интернету"
+            code.contains("TIMEOUT") -> "⏱ Сервер VK не отвечает"
+            code.contains("HTTP_403") -> "🚫 Канал недоступен (VK: 403)"
+            code.contains("HTTP_404") -> "🚫 Канал не найден (VK: 404)"
+            code.contains("NO_M3U8") -> "🔍 Не удалось найти поток"
+            code.contains("PARSE_ERROR") -> "📄 VK вернул некорректный ответ"
+            code.contains("VK_OFFLINE") -> "📺 Канал сейчас не транслируется"
+            code.contains("STALL") -> "⏳ Поток замер"
+            else -> detail
+        }
+    }
+
     private fun playerStateName(state: Int): String = when (state) {
         Player.STATE_IDLE -> "IDLE"
         Player.STATE_BUFFERING -> "BUFFERING"
@@ -296,7 +311,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun setupFocusHighlight() {
-        listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->
+        listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp, b.btnBug).forEach { tv ->
             tv.setOnFocusChangeListener { _, hasFocus ->
                 tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
             }
@@ -358,8 +373,13 @@ class PlayerActivity : BaseActivity() {
             }
             R.id.btnAspect -> when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> R.id.btnQuality
+                KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnBug
                 KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
-                KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                else -> null
+            }
+            R.id.btnBug -> when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> R.id.btnAspect
+                KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
                 else -> null
             }
             else -> null
@@ -431,7 +451,7 @@ class PlayerActivity : BaseActivity() {
         b.channelListRecycler.layoutManager = LinearLayoutManager(this)
         b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
             val idx = urls.indexOf(ch.url)
-            if (idx >= 0) { currentIndex = idx; retryCount = 0; startPlayback() }
+            if (idx >= 0) { currentIndex = idx; retryCount = 0; hasBeenReady = false; startPlayback() }
             b.channelListPanel.visibility = View.GONE
         }
         b.channelListRecycler.scrollToPosition(currentIndex)
@@ -440,7 +460,7 @@ class PlayerActivity : BaseActivity() {
 
     private fun switchChannel(direction: Int) {
         val newIndex = currentIndex + direction
-        if (newIndex in urls.indices) { currentIndex = newIndex; retryCount = 0; startPlayback() }
+        if (newIndex in urls.indices) { currentIndex = newIndex; retryCount = 0; hasBeenReady = false; startPlayback() }
     }
 
     private fun startPlayback() {
@@ -460,7 +480,7 @@ class PlayerActivity : BaseActivity() {
         if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
         if (!NetworkUtils.isOnline(this)) {
             b.progress.visibility = View.GONE
-            b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."
+            b.errorText.text = humanError("NO_NETWORK", "Нет подключения к интернету.")
             b.errorLayout.visibility = View.VISIBLE
             CrashLogger.info("Player", "Нет интернета")
             return
@@ -479,12 +499,8 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun shouldRetry(errorText: String): Boolean {
-        return errorText.contains("Timeout", ignoreCase = true) ||
-               errorText.contains("ConnectionError", ignoreCase = true) ||
-               errorText.contains("NetworkError", ignoreCase = true) ||
-               errorText.contains("HTTPError", ignoreCase = true) ||
-               errorText.contains("IncompleteRead", ignoreCase = true) ||
-               errorText.contains("SSLError", ignoreCase = true)
+        return errorText.contains("TIMEOUT", ignoreCase = true) ||
+               errorText.contains("NO_NETWORK", ignoreCase = true)
     }
 
     private fun buildHttpDataSource(): OkHttpDataSource.Factory {
@@ -514,10 +530,17 @@ class PlayerActivity : BaseActivity() {
                 override fun onPlaybackStateChanged(state: Int) {
                     when (state) {
                         Player.STATE_BUFFERING -> {
-                            handler.removeCallbacks(hideBufferingRunnable)
-                            handler.postDelayed(showBufferingRunnable, 500)
+                            if (!hasBeenReady) {
+                                handler.removeCallbacks(hideBufferingRunnable)
+                                handler.postDelayed(showBufferingRunnable, 1500)
+                            }
                         }
-                        Player.STATE_READY, Player.STATE_ENDED, Player.STATE_IDLE -> {
+                        Player.STATE_READY -> {
+                            hasBeenReady = true
+                            handler.removeCallbacks(showBufferingRunnable)
+                            b.bufferingText.visibility = View.GONE
+                        }
+                        Player.STATE_ENDED, Player.STATE_IDLE -> {
                             handler.removeCallbacks(showBufferingRunnable)
                             b.bufferingText.visibility = View.GONE
                         }
@@ -597,8 +620,9 @@ class PlayerActivity : BaseActivity() {
         } else {
             b.progress.visibility = View.GONE
             val details = errorText ?: "Неизвестная ошибка"
-            val attempts = if (allowRetry) MAX_RETRIES else 0
-            b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $attempts"
+            val code = if (details.contains("[")) details.substringAfter("[").substringBefore("]") else ""
+            val human = humanError(code, details)
+            b.errorText.text = "Не удалось воспроизвести канал\n\n$human"
             b.errorLayout.visibility = View.VISIBLE
             b.controlsOverlay.visibility = View.GONE
             b.rightControls.visibility = View.GONE

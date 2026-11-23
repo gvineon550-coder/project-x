@@ -133,7 +133,7 @@ HEADERS = {
 def resolve(url):
     try:
         opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                "http_headers": HEADERS, "socket_timeout": 15}
+                "http_headers": HEADERS, "socket_timeout": 15, "cachedir": False}
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         if info.get("url") and ".m3u8" in info["url"]:
@@ -150,9 +150,20 @@ def resolve(url):
                 h = f.get("height") or 0
                 if h > max_h: max_h = h; best = f
         if best: return best["url"]
-        return info.get("url") or "ERROR: no m3u8 found"
+        return "ERROR[NO_M3U8]: no m3u8 found"
     except Exception as e:
-        return "ERROR[" + type(e).__name__ + "]: " + str(e)
+        ename = type(e).__name__
+        estrt = str(e)
+        if "Timeout" in ename or "timeout" in estrt.lower():
+            return "ERROR[TIMEOUT]: " + estrt
+        if "ConnectionError" in ename or "NetworkError" in ename:
+            return "ERROR[NO_NETWORK]: " + estrt
+        if "HTTPError" in ename:
+            code = getattr(e, "code", 0)
+            if code == 403: return "ERROR[HTTP_403]: " + estrt
+            if code == 404: return "ERROR[HTTP_404]: " + estrt
+            return "ERROR[HTTP_ERR]: " + estrt
+        return "ERROR[" + ename + "]: " + estrt
 def get_thumbnail(url):
     try:
         req = urllib.request.Request(url, headers=HEADERS)
@@ -165,7 +176,7 @@ def get_thumbnail(url):
         pass
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True,
-                               "http_headers": HEADERS, "socket_timeout": 15}) as ydl:
+                               "http_headers": HEADERS, "socket_timeout": 15, "cachedir": False}) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get("thumbnail", "")
     except Exception:
