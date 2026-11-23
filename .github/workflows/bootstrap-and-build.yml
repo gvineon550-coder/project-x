@@ -503,6 +503,15 @@ jobs:
                       android:focusable="true"
                       android:clickable="true"
                       android:background="?attr/selectableItemBackground" />
+                  <TextView
+                      android:id="@+id/txtClock"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="--:--"
+                      android:textColor="#FF8A8D93"
+                      android:textSize="18sp"
+                      android:textStyle="bold"
+                      android:paddingStart="12dp" />
               </LinearLayout>
               <androidx.recyclerview.widget.RecyclerView
                   android:id="@+id/recycler"
@@ -522,22 +531,42 @@ jobs:
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
                   app:layout_constraintStart_toStartOf="parent"
                   app:layout_constraintEnd_toEndOf="parent" />
-              <TextView
-                  android:id="@+id/error"
+              <LinearLayout
+                  android:id="@+id/errorLayout"
                   android:layout_width="0dp"
                   android:layout_height="wrap_content"
-                  android:padding="24dp"
+                  android:layout_gravity="center"
                   android:gravity="center"
-                  android:textColor="#FFFF6B6B"
-                  android:textSize="14sp"
-                  android:lineSpacingExtra="3dp"
-                  android:clickable="true"
-                  android:focusable="true"
+                  android:orientation="vertical"
+                  android:padding="24dp"
                   android:visibility="gone"
                   app:layout_constraintTop_toTopOf="@id/recycler"
                   app:layout_constraintBottom_toBottomOf="@id/recycler"
                   app:layout_constraintStart_toStartOf="parent"
-                  app:layout_constraintEnd_toEndOf="parent" />
+                  app:layout_constraintEnd_toEndOf="parent">
+                  <TextView
+                      android:id="@+id/error"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:gravity="center"
+                      android:textColor="#FFFF6B6B"
+                      android:textSize="14sp"
+                      android:lineSpacingExtra="3dp" />
+                  <TextView
+                      android:id="@+id/btnRetryMain"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="16dp"
+                      android:background="@drawable/button_accent_bg"
+                      android:paddingHorizontal="32dp"
+                      android:paddingVertical="12dp"
+                      android:text="Повторить"
+                      android:textColor="#FFFFFFFF"
+                      android:textSize="16sp"
+                      android:textStyle="bold"
+                      android:focusable="true"
+                      android:clickable="true" />
+              </LinearLayout>
           </androidx.constraintlayout.widget.ConstraintLayout>
           EOF
 
@@ -1189,7 +1218,7 @@ jobs:
               android:background="?attr/selectableItemBackground" />
           EOF
 
-      - name: "🐍 Python (DoH с счётчиками и slow-trigger breaker)"
+      - name: "🐍 Python (DoH с счётчиками, без кэша yt-dlp)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
@@ -1328,7 +1357,7 @@ jobs:
           def resolve(url):
               try:
                   opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                          "http_headers": HEADERS, "socket_timeout": 15}
+                          "http_headers": HEADERS, "socket_timeout": 15, "cachedir": False}
                   with yt_dlp.YoutubeDL(opts) as ydl:
                       info = ydl.extract_info(url, download=False)
                   if info.get("url") and ".m3u8" in info["url"]:
@@ -1345,9 +1374,20 @@ jobs:
                           h = f.get("height") or 0
                           if h > max_h: max_h = h; best = f
                   if best: return best["url"]
-                  return info.get("url") or "ERROR: no m3u8 found"
+                  return "ERROR[NO_M3U8]: no m3u8 found"
               except Exception as e:
-                  return "ERROR[" + type(e).__name__ + "]: " + str(e)
+                  ename = type(e).__name__
+                  estrt = str(e)
+                  if "Timeout" in ename or "timeout" in estrt.lower():
+                      return "ERROR[TIMEOUT]: " + estrt
+                  if "ConnectionError" in ename or "NetworkError" in ename:
+                      return "ERROR[NO_NETWORK]: " + estrt
+                  if "HTTPError" in ename:
+                      code = getattr(e, "code", 0)
+                      if code == 403: return "ERROR[HTTP_403]: " + estrt
+                      if code == 404: return "ERROR[HTTP_404]: " + estrt
+                      return "ERROR[HTTP_ERR]: " + estrt
+                  return "ERROR[" + ename + "]: " + estrt
           def get_thumbnail(url):
               try:
                   req = urllib.request.Request(url, headers=HEADERS)
@@ -1360,7 +1400,7 @@ jobs:
                   pass
               try:
                   with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True,
-                                         "http_headers": HEADERS, "socket_timeout": 15}) as ydl:
+                                         "http_headers": HEADERS, "socket_timeout": 15, "cachedir": False}) as ydl:
                       info = ydl.extract_info(url, download=False)
                       return info.get("thumbnail", "")
               except Exception:
@@ -1583,12 +1623,17 @@ jobs:
               private const val PREFS = "cache_manager"
               private const val KEY_LAST_CLEANUP = "last_cleanup"
               private const val MIN_INTERVAL_MS = 3 * 60 * 60 * 1000L
+              private const val FORCE_CLEANUP_THRESHOLD = 15 * 1024 * 1024
 
               fun maybeCleanup(context: Context) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val last = prefs.getLong(KEY_LAST_CLEANUP, 0L)
                   val now = System.currentTimeMillis()
-                  if (now - last < MIN_INTERVAL_MS) return
+
+                  var currentCacheSize = 0L
+                  context.cacheDir.walkTopDown().forEach { if (it.isFile) currentCacheSize += it.length() }
+
+                  if (now - last < MIN_INTERVAL_MS && currentCacheSize < FORCE_CLEANUP_THRESHOLD) return
                   prefs.edit().putLong(KEY_LAST_CLEANUP, now).apply()
                   Thread { performCleanup(context.applicationContext) }
                       .apply { name = "CacheCleanup"; isDaemon = true }.start()
@@ -1629,7 +1674,7 @@ jobs:
 
                       var cacheSize = 0L
                       context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-                      if (cacheSize > 8 * 1024 * 1024) {
+                      if (cacheSize > 10 * 1024 * 1024) {
                           val mb = cacheSize / 1024 / 1024
                           context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
                           CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
@@ -2211,7 +2256,7 @@ jobs:
 
           object StreamCache {
               private const val PREFS = "stream_cache"
-              private const val TTL_MS = 4 * 60 * 60 * 1000L
+              private const val TTL_MS = 6 * 60 * 60 * 1000L
               private const val MAX_ENTRIES = 120
 
               fun get(context: Context, channelUrl: String): String? {
@@ -2453,6 +2498,8 @@ jobs:
           import android.graphics.Color
           import android.net.Uri
           import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
           import android.provider.Settings
           import android.view.View
           import android.widget.Toast
@@ -2470,6 +2517,7 @@ jobs:
           import okhttp3.OkHttpClient
           import org.json.JSONObject
           import java.io.File
+          import java.util.Calendar
           import java.util.concurrent.TimeUnit
 
           class MainActivity : BaseActivity(), ImageLoaderFactory {
@@ -2479,6 +2527,14 @@ jobs:
               private val prefs by lazy { getSharedPreferences("tvplayer", MODE_PRIVATE) }
               private var backPressedTime: Long = 0
               private var needScrollOnResume = false
+              private val clockHandler = Handler(Looper.getMainLooper())
+              private val clockRunnable = object : Runnable {
+                  override fun run() {
+                      val cal = Calendar.getInstance()
+                      b.txtClock.text = String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+                      clockHandler.postDelayed(this, 1000)
+                  }
+              }
 
               override fun newImageLoader(): ImageLoader {
                   val dohOkHttp = OkHttpClient.Builder()
@@ -2511,17 +2567,22 @@ jobs:
                   b.btnRefresh.setOnClickListener {
                       CrashLogger.info("UI", "Кнопка Обновить")
                       b.progress.visibility = View.VISIBLE
+                      b.errorLayout.visibility = View.GONE
                       loadFromNetwork(forceRefresh = true)
                   }
                   b.btnFavFilter.setOnClickListener { showOnlyFavorites = !showOnlyFavorites; updateView(scrollToLast = false) }
                   b.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
                   b.btnCheckUpdates.setOnClickListener { manualCheckForUpdates() }
+                  b.btnRetryMain.setOnClickListener {
+                      b.errorLayout.visibility = View.GONE
+                      b.progress.visibility = View.VISIBLE
+                      loadFromNetwork(forceRefresh = true)
+                  }
 
                   b.btnFavFilter.nextFocusDownId = R.id.recycler
                   b.btnRefresh.nextFocusDownId = R.id.recycler
                   b.btnCheckUpdates.nextFocusDownId = R.id.recycler
                   b.btnSettings.nextFocusDownId = R.id.recycler
-                  b.error.setOnClickListener { showLogDialog() }
 
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() {
@@ -2536,6 +2597,7 @@ jobs:
                   })
 
                   loadInitial()
+                  clockHandler.post(clockRunnable)
               }
 
               override fun onResume() {
@@ -2543,6 +2605,24 @@ jobs:
                   if (needScrollOnResume && allChannels.isNotEmpty()) {
                       needScrollOnResume = false
                       b.recycler.postDelayed({ scrollToLastChannel() }, 200)
+                  }
+              }
+
+              override fun onDestroy() {
+                  clockHandler.removeCallbacks(clockRunnable)
+                  super.onDestroy()
+              }
+
+              private fun humanError(code: String, detail: String): String {
+                  return when {
+                      code.contains("NO_NETWORK") -> "📡 Нет подключения к интернету"
+                      code.contains("TIMEOUT") -> "⏱ Сервер VK не отвечает"
+                      code.contains("HTTP_403") -> "🚫 Канал недоступен (VK: 403)"
+                      code.contains("HTTP_404") -> "🚫 Канал не найден (VK: 404)"
+                      code.contains("NO_M3U8") -> "🔍 Не удалось найти поток"
+                      code.contains("PARSE_ERROR") -> "📄 VK вернул некорректный ответ"
+                      code.contains("VK_OFFLINE") -> "📺 Канал сейчас не транслируется"
+                      else -> detail
                   }
               }
 
@@ -2580,8 +2660,8 @@ jobs:
                       b.progress.visibility = View.GONE
                       if (allChannels.isEmpty()) {
                           b.recycler.visibility = View.GONE
-                          b.error.text = "Нет подключения к интернету.\n\nНажмите для подробностей."
-                          b.error.visibility = View.VISIBLE
+                          b.error.text = humanError("NO_NETWORK", "Нет подключения к интернету.")
+                          b.errorLayout.visibility = View.VISIBLE
                       }
                       return
                   }
@@ -2626,14 +2706,14 @@ jobs:
                                   updateView(scrollToLast = forceRefresh)
                               }
                           } else {
-                              b.error.text = "Не удалось загрузить каналы.\n\nНажмите для подробностей."
-                              b.error.visibility = View.VISIBLE
+                              b.error.text = "Не удалось загрузить каналы."
+                              b.errorLayout.visibility = View.VISIBLE
                               CrashLogger.error("MainActivity", "Пустой список каналов")
                           }
                       } catch (e: Exception) {
                           b.progress.visibility = View.GONE
                           b.error.text = "Ошибка загрузки:\n${e.javaClass.simpleName}: ${e.message}"
-                          b.error.visibility = View.VISIBLE
+                          b.errorLayout.visibility = View.VISIBLE
                           CrashLogger.error("MainActivity", "Исключение при загрузке", e)
                       }
                   }
@@ -2708,7 +2788,7 @@ jobs:
               private fun updateView(scrollToLast: Boolean = false) {
                   if (allChannels.isEmpty()) return
                   b.progress.visibility = View.GONE
-                  b.error.visibility = View.GONE
+                  b.errorLayout.visibility = View.GONE
                   val favs = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
                   allChannels.forEach { it.isFavorite = favs.contains(it.url) }
                   val sorted = allChannels.sortedByDescending { it.isFavorite }
@@ -2802,10 +2882,10 @@ jobs:
                       • Панель каналов в плеере (ОК)
                       • Таймер сна (5м – 5ч)
                       • Автовыключение через 4ч без активности
-                      • Умное кэширование + автоочистка (3ч)
+                      • Умное кэширование + автоочистка (3ч / >15МБ)
                       • DNS-over-HTTPS (AdGuard) — ВСЕ запросы
                       • Тумблер DoH + диагностика
-                      • Кнопка 🐛 в плеере — живая телеметрия
+                      • Кнопка 🐛 в плеере (навигация пультом)
                       • Индикатор буферизации + часы на оверлее
                       • Подробный лог
 
@@ -3019,7 +3099,7 @@ jobs:
                           appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
                           appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
                           appendLine("🐍 Python: ${formatSize(pythonSize)}")
-                          appendLine("📦 Cache всего: ${formatSize(totalCache)} / 8 МБ")
+                          appendLine("📦 Cache всего: ${formatSize(totalCache)} / 10 МБ")
                           append("💾 Files всего: ${formatSize(totalFiles)} / 30 МБ")
                       }
                       b.txtCacheStats.text = stats
@@ -3121,6 +3201,7 @@ jobs:
               private var urls: List<String> = emptyList()
               private var currentIndex: Int = 0
               private var retryCount = 0
+              private var hasBeenReady = false
               private val MAX_RETRIES = 5
               private val RETRY_DELAY = 2000L
               private var currentResizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -3139,7 +3220,7 @@ jobs:
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
 
               private val showBufferingRunnable = Runnable {
-                  if (player?.playbackState == Player.STATE_BUFFERING) {
+                  if (player?.playbackState == Player.STATE_BUFFERING && !hasBeenReady) {
                       b.bufferingText.visibility = View.VISIBLE
                   }
               }
@@ -3160,7 +3241,7 @@ jobs:
                           CrashLogger.info("Player", "Стоп-кадр на ${pos}мс — перерезолв")
                           urls.getOrNull(currentIndex)?.let { StreamCache.invalidate(this@PlayerActivity, it) }
                           handler.removeCallbacks(this)
-                          handleError("Поток замер")
+                          handleError("ERROR[STALL]: Поток замер")
                           return
                       }
                       lastPlayerPosition = pos
@@ -3189,7 +3270,7 @@ jobs:
 
                   b.btnBack.setOnClickListener { finish() }
                   b.btnExitApp.setOnClickListener { exitApp() }
-                  b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; startPlayback() }
+                  b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; hasBeenReady = false; startPlayback() }
                   b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
                   b.btnShowLog.setOnClickListener { showLogDialog() }
                   b.btnBug.setOnClickListener { showDebugPanel() }
@@ -3334,6 +3415,20 @@ jobs:
                   return sb.toString()
               }
 
+              private fun humanError(code: String, detail: String): String {
+                  return when {
+                      code.contains("NO_NETWORK") -> "📡 Нет подключения к интернету"
+                      code.contains("TIMEOUT") -> "⏱ Сервер VK не отвечает"
+                      code.contains("HTTP_403") -> "🚫 Канал недоступен (VK: 403)"
+                      code.contains("HTTP_404") -> "🚫 Канал не найден (VK: 404)"
+                      code.contains("NO_M3U8") -> "🔍 Не удалось найти поток"
+                      code.contains("PARSE_ERROR") -> "📄 VK вернул некорректный ответ"
+                      code.contains("VK_OFFLINE") -> "📺 Канал сейчас не транслируется"
+                      code.contains("STALL") -> "⏳ Поток замер"
+                      else -> detail
+                  }
+              }
+
               private fun playerStateName(state: Int): String = when (state) {
                   Player.STATE_IDLE -> "IDLE"
                   Player.STATE_BUFFERING -> "BUFFERING"
@@ -3373,7 +3468,7 @@ jobs:
               }
 
               private fun setupFocusHighlight() {
-                  listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp).forEach { tv ->
+                  listOf(b.btnQuality, b.btnSleepTimer, b.btnAspect, b.btnBack, b.btnExitApp, b.btnBug).forEach { tv ->
                       tv.setOnFocusChangeListener { _, hasFocus ->
                           tv.setTextColor(if (hasFocus) Color.BLACK else Color.WHITE)
                       }
@@ -3435,8 +3530,13 @@ jobs:
                       }
                       R.id.btnAspect -> when (keyCode) {
                           KeyEvent.KEYCODE_DPAD_UP -> R.id.btnQuality
+                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnBug
                           KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
-                          KeyEvent.KEYCODE_DPAD_DOWN -> R.id.btnPlayPause
+                          else -> null
+                      }
+                      R.id.btnBug -> when (keyCode) {
+                          KeyEvent.KEYCODE_DPAD_UP -> R.id.btnAspect
+                          KeyEvent.KEYCODE_DPAD_LEFT -> R.id.btnPlayPause
                           else -> null
                       }
                       else -> null
@@ -3508,7 +3608,7 @@ jobs:
                   b.channelListRecycler.layoutManager = LinearLayoutManager(this)
                   b.channelListRecycler.adapter = ChannelListAdapter(channels) { ch ->
                       val idx = urls.indexOf(ch.url)
-                      if (idx >= 0) { currentIndex = idx; retryCount = 0; startPlayback() }
+                      if (idx >= 0) { currentIndex = idx; retryCount = 0; hasBeenReady = false; startPlayback() }
                       b.channelListPanel.visibility = View.GONE
                   }
                   b.channelListRecycler.scrollToPosition(currentIndex)
@@ -3517,7 +3617,7 @@ jobs:
 
               private fun switchChannel(direction: Int) {
                   val newIndex = currentIndex + direction
-                  if (newIndex in urls.indices) { currentIndex = newIndex; retryCount = 0; startPlayback() }
+                  if (newIndex in urls.indices) { currentIndex = newIndex; retryCount = 0; hasBeenReady = false; startPlayback() }
               }
 
               private fun startPlayback() {
@@ -3537,7 +3637,7 @@ jobs:
                   if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
                   if (!NetworkUtils.isOnline(this)) {
                       b.progress.visibility = View.GONE
-                      b.errorText.text = "Нет подключения к интернету.\n\nНажмите «Повторить»."
+                      b.errorText.text = humanError("NO_NETWORK", "Нет подключения к интернету.")
                       b.errorLayout.visibility = View.VISIBLE
                       CrashLogger.info("Player", "Нет интернета")
                       return
@@ -3556,12 +3656,8 @@ jobs:
               }
 
               private fun shouldRetry(errorText: String): Boolean {
-                  return errorText.contains("Timeout", ignoreCase = true) ||
-                         errorText.contains("ConnectionError", ignoreCase = true) ||
-                         errorText.contains("NetworkError", ignoreCase = true) ||
-                         errorText.contains("HTTPError", ignoreCase = true) ||
-                         errorText.contains("IncompleteRead", ignoreCase = true) ||
-                         errorText.contains("SSLError", ignoreCase = true)
+                  return errorText.contains("TIMEOUT", ignoreCase = true) ||
+                         errorText.contains("NO_NETWORK", ignoreCase = true)
               }
 
               private fun buildHttpDataSource(): OkHttpDataSource.Factory {
@@ -3591,10 +3687,17 @@ jobs:
                           override fun onPlaybackStateChanged(state: Int) {
                               when (state) {
                                   Player.STATE_BUFFERING -> {
-                                      handler.removeCallbacks(hideBufferingRunnable)
-                                      handler.postDelayed(showBufferingRunnable, 500)
+                                      if (!hasBeenReady) {
+                                          handler.removeCallbacks(hideBufferingRunnable)
+                                          handler.postDelayed(showBufferingRunnable, 1500)
+                                      }
                                   }
-                                  Player.STATE_READY, Player.STATE_ENDED, Player.STATE_IDLE -> {
+                                  Player.STATE_READY -> {
+                                      hasBeenReady = true
+                                      handler.removeCallbacks(showBufferingRunnable)
+                                      b.bufferingText.visibility = View.GONE
+                                  }
+                                  Player.STATE_ENDED, Player.STATE_IDLE -> {
                                       handler.removeCallbacks(showBufferingRunnable)
                                       b.bufferingText.visibility = View.GONE
                                   }
@@ -3674,8 +3777,9 @@ jobs:
                   } else {
                       b.progress.visibility = View.GONE
                       val details = errorText ?: "Неизвестная ошибка"
-                      val attempts = if (allowRetry) MAX_RETRIES else 0
-                      b.errorText.text = "Не удалось воспроизвести канал\n\n$details\n\nПопыток: $attempts"
+                      val code = if (details.contains("[")) details.substringAfter("[").substringBefore("]") else ""
+                      val human = humanError(code, details)
+                      b.errorText.text = "Не удалось воспроизвести канал\n\n$human"
                       b.errorLayout.visibility = View.VISIBLE
                       b.controlsOverlay.visibility = View.GONE
                       b.rightControls.visibility = View.GONE
@@ -3779,26 +3883,26 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🔧 **Исправления и улучшения**
+            🎯 **Финальные штрихи**
 
-            **Фиксы:**
-            - `MemoryCache.Builder.maxSizeBytes(6 * 1024 * 1024)` — убран `Long`, теперь `Int` (компиляция проходит)
-            - Убран мёртвый `<service .PlaybackService>` из манифеста
+            **Интерфейс и навигация:**
+            - 🐛 теперь доступна с пульта: «Заполнить» → вниз → ОК.
+            - Часы `HH:mm` в шапке главного меню.
+            - Кнопка «Повторить» на экране ошибки загрузки каналов.
 
-            **Новые фичи (пункты 3 и 4):**
-            - **Индикатор «⏳ Загрузка потока…»** — появляется через 500мс после `STATE_BUFFERING`, скрывается при `STATE_READY`. Защита от мигания при быстром старте.
-            - **Часы `HH:mm`** в оверлее канала — при переключении видно текущее время рядом с именем.
+            **Человеческие ошибки:**
+            - 📡 Нет сети
+            - ⏱ VK не отвечает
+            - 🚫 403/404
+            - 📺 Канал оффлайн
+            - 🔍 Поток не найден
+            - Вместо технических `ERROR[...]`.
 
-            **Из прошлых версий:**
-            - 🐛 кнопка отладки (телеметрия 1раз/сек)
-            - DoH AdGuard + тумблер + диагностика
-            - Минимальный кэш (5/6/256/200, 120/30)
-            - Автовыключение 4ч без активности
-            - Stall checker
-            - Stealth (X-From-Id, ThumbCache)
-            - Exponential backoff
-            - `versionName` = номер сборки
-            - `setup-java@v5`
+            **Стабильность и кэш:**
+            - `yt-dlp` больше не кэширует мусор (`cachedir=False`).
+            - `CacheManager` чистит принудительно при >15 МБ.
+            - TTL ссылок увеличен до 6 часов.
+            - Плашка «⏳ Загрузка» — через 1.5с, только при первом старте (не мигает).
 
             📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
