@@ -62,15 +62,6 @@ class PlayerActivity : BaseActivity() {
     }
     private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
 
-    private val showBufferingRunnable = Runnable {
-        if (player?.playbackState == Player.STATE_BUFFERING && !hasBeenReady) {
-            b.bufferingText.visibility = View.VISIBLE
-        }
-    }
-    private val hideBufferingRunnable = Runnable {
-        b.bufferingText.visibility = View.GONE
-    }
-
     private val stallChecker = object : Runnable {
         override fun run() {
             val p = player ?: return
@@ -244,7 +235,7 @@ class PlayerActivity : BaseActivity() {
         val thumbPrefs = getSharedPreferences("thumb_cache", MODE_PRIVATE)
         sb.appendLine("  thumb: ${thumbPrefs.all.size}/30")
         val coilDisk = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        sb.appendLine("  coil: ${formatBytes(coilDisk)} / 5 МБ")
+        sb.appendLine("  coil: ${formatBytes(coilDisk)} / 3 МБ")
         val logFile = File(filesDir, "app.log")
         sb.appendLine("  log: ${formatBytes(if (logFile.exists()) logFile.length() else 0L)} / 200 КБ")
         val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -517,8 +508,6 @@ class PlayerActivity : BaseActivity() {
     private fun play(m3u8: String) {
         player?.release()
         handler.removeCallbacks(stallChecker)
-        handler.removeCallbacks(showBufferingRunnable)
-        handler.removeCallbacks(hideBufferingRunnable)
         lastPlayerPosition = -1L
         val dataSource = buildHttpDataSource()
         val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
@@ -531,17 +520,15 @@ class PlayerActivity : BaseActivity() {
                     when (state) {
                         Player.STATE_BUFFERING -> {
                             if (!hasBeenReady) {
-                                handler.removeCallbacks(hideBufferingRunnable)
-                                handler.postDelayed(showBufferingRunnable, 1500)
+                                b.bufferingText.visibility = View.VISIBLE
+                                b.progress.visibility = View.GONE // Скрываем круговой спиннер, чтобы не дублировался
                             }
                         }
                         Player.STATE_READY -> {
                             hasBeenReady = true
-                            handler.removeCallbacks(showBufferingRunnable)
                             b.bufferingText.visibility = View.GONE
                         }
                         Player.STATE_ENDED, Player.STATE_IDLE -> {
-                            handler.removeCallbacks(showBufferingRunnable)
                             b.bufferingText.visibility = View.GONE
                         }
                     }
@@ -609,7 +596,6 @@ class PlayerActivity : BaseActivity() {
 
     private fun handleError(errorText: String? = null, allowRetry: Boolean = true) {
         handler.removeCallbacks(stallChecker)
-        handler.removeCallbacks(showBufferingRunnable)
         b.bufferingText.visibility = View.GONE
         if (allowRetry && retryCount < MAX_RETRIES) {
             retryCount++

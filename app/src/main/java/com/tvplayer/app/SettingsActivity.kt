@@ -68,7 +68,9 @@ class SettingsActivity : BaseActivity() {
             StreamCache.clearAll(this)
             ChannelCache.clear(this)
             ThumbCache.clear(this)
-            cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+            File(cacheDir, "image_cache").deleteRecursively()
+            File(cacheDir, "doh_cache").deleteRecursively()
+            File(cacheDir, "update.apk").delete()
             Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
             updateCacheInfo()
             CrashLogger.info("Settings", "Кэш очищен вручную")
@@ -206,7 +208,9 @@ class SettingsActivity : BaseActivity() {
             val il = Coil.imageLoader(this)
             il.diskCache?.clear()
             il.memoryCache?.clear()
-            cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+            File(cacheDir, "image_cache").deleteRecursively()
+            File(cacheDir, "doh_cache").deleteRecursively()
+            File(cacheDir, "update.apk").delete()
             DohProvider.invalidate()
             try { Coil.reset() } catch (_: Exception) {}
             lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }
@@ -250,12 +254,12 @@ class SettingsActivity : BaseActivity() {
             val pythonSize = totalFiles - channelsCacheSize - logSize
 
             val stats = buildString {
-                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 5 МБ")
+                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 3 МБ")
                 appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
                 appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
                 appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
                 appendLine("🐍 Python: ${formatSize(pythonSize)}")
-                appendLine("📦 Cache всего: ${formatSize(totalCache)} / 10 МБ")
+                appendLine("📦 Cache всего: ${formatSize(totalCache)}")
                 append("💾 Files всего: ${formatSize(totalFiles)} / 30 МБ")
             }
             b.txtCacheStats.text = stats

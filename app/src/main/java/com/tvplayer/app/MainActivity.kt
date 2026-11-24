@@ -56,12 +56,12 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(5L * 1024L * 1024L)
+                    .maxSizeBytes(3L * 1024L * 1024L) // Уменьшено до 3 МБ
                     .build()
             }
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizeBytes(6 * 1024 * 1024)
+                    .maxSizeBytes(4 * 1024 * 1024) // Уменьшено до 4 МБ
                     .build()
             }
             .build()
@@ -72,6 +72,9 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
+
+        // Очистка только 1 раз при старте главного экрана (а не при каждом onResume)
+        CacheManager.maybeCleanup(this)
 
         b.btnRefresh.setOnClickListener {
             CrashLogger.info("UI", "Кнопка Обновить")

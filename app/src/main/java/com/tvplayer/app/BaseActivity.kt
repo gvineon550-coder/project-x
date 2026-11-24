@@ -20,7 +20,7 @@ open class BaseActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         resetInactivityTimer()
-        CacheManager.maybeCleanup(this)
+        // CacheManager.maybeCleanup(this) <-- ПЕРЕНЕСЕНО В MainActivity.onCreate
     }
 
     override fun onPause() {
