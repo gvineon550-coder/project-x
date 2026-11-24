@@ -1578,7 +1578,7 @@ jobs:
               override fun onResume() {
                   super.onResume()
                   resetInactivityTimer()
-                  CacheManager.maybeCleanup(this)
+                  // CacheManager.maybeCleanup(this) <-- ПЕРЕНЕСЕНО В MainActivity.onCreate
               }
 
               override fun onPause() {
@@ -1616,24 +1616,19 @@ jobs:
           cat > app/src/main/java/com/tvplayer/app/CacheManager.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
-          import android.os.StatFs
           import java.io.File
 
           object CacheManager {
               private const val PREFS = "cache_manager"
               private const val KEY_LAST_CLEANUP = "last_cleanup"
-              private const val MIN_INTERVAL_MS = 3 * 60 * 60 * 1000L
-              private const val FORCE_CLEANUP_THRESHOLD = 15 * 1024 * 1024
+              private const val MIN_INTERVAL_MS = 6 * 60 * 60 * 1000L // 6 часов
 
               fun maybeCleanup(context: Context) {
                   val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                   val last = prefs.getLong(KEY_LAST_CLEANUP, 0L)
                   val now = System.currentTimeMillis()
-
-                  var currentCacheSize = 0L
-                  context.cacheDir.walkTopDown().forEach { if (it.isFile) currentCacheSize += it.length() }
-
-                  if (now - last < MIN_INTERVAL_MS && currentCacheSize < FORCE_CLEANUP_THRESHOLD) return
+                  if (now - last < MIN_INTERVAL_MS) return
+                  
                   prefs.edit().putLong(KEY_LAST_CLEANUP, now).apply()
                   Thread { performCleanup(context.applicationContext) }
                       .apply { name = "CacheCleanup"; isDaemon = true }.start()
@@ -1641,16 +1636,15 @@ jobs:
 
               private fun performCleanup(context: Context) {
                   try {
-                      val updateApk = File(context.cacheDir, "update.apk")
-                      if (updateApk.exists()) {
-                          val sizeMb = updateApk.length() / 1024 / 1024
-                          updateApk.delete()
-                          CrashLogger.info("Cleanup", "Удалён update.apk ($sizeMb МБ)")
-                      }
+                      // 1. Удаляем строго определенные папки (без ExoPlayer и Chaquopy)
+                      File(context.cacheDir, "image_cache").deleteRecursively()
+                      File(context.cacheDir, "doh_cache").deleteRecursively()
+                      File(context.cacheDir, "update.apk").delete()
 
                       StreamCache.cleanup(context)
                       ThumbCache.evictIfNeeded(context)
 
+                      // 2. Удаляем старые файлы в cacheDir (>7 дней)
                       val sevenDays = 7L * 24 * 60 * 60 * 1000
                       val now = System.currentTimeMillis()
                       var oldRemoved = 0
@@ -1672,35 +1666,23 @@ jobs:
                           CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
                       }
 
+                      // 3. Считаем итоговые размеры
                       var cacheSize = 0L
                       context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
-                      if (cacheSize > 10 * 1024 * 1024) {
-                          val mb = cacheSize / 1024 / 1024
-                          context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                          CrashLogger.info("Cleanup", "cacheDir очищен ($mb МБ)")
-                          cacheSize = 0L
-                      }
-
+                      
                       var filesSize = 0L
                       context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
                       val filesMb = filesSize / 1024 / 1024
+                      
                       if (filesSize > 30 * 1024 * 1024) {
                           CrashLogger.error("Cleanup", "⚠️ filesDir=${filesMb}МБ > 30МБ! Аварийная очистка")
                           ChannelCache.clear(context)
                           CrashLogger.clear(context)
                           filesSize = 0L
                           context.filesDir.walkTopDown().forEach { if (it.isFile) filesSize += it.length() }
-                      } else if (filesSize > 25 * 1024 * 1024) {
-                          CrashLogger.info("Cleanup", "⚠️ filesDir=${filesMb}МБ > 25МБ (аномалия)")
                       }
 
-                      val stat = StatFs(context.filesDir.path)
-                      val freeMb = stat.availableBytes / 1024 / 1024
-                      if (freeMb < 100) {
-                          CrashLogger.info("Cleanup", "⚠️ Свободно ${freeMb}МБ (<100МБ)")
-                      }
-
-                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ, free=${freeMb}МБ")
+                      CrashLogger.info("Cleanup", "Размеры: files=${filesSize/1024}КБ, cache=${cacheSize/1024}КБ")
                   } catch (e: Exception) {
                       CrashLogger.error("Cleanup", "Ошибка автоочистки", e)
                   }
@@ -2547,12 +2529,12 @@ jobs:
                       .diskCache {
                           DiskCache.Builder()
                               .directory(cacheDir.resolve("image_cache"))
-                              .maxSizeBytes(5L * 1024L * 1024L)
+                              .maxSizeBytes(3L * 1024L * 1024L) // Уменьшено до 3 МБ
                               .build()
                       }
                       .memoryCache {
                           MemoryCache.Builder(this)
-                              .maxSizeBytes(6 * 1024 * 1024)
+                              .maxSizeBytes(4 * 1024 * 1024) // Уменьшено до 4 МБ
                               .build()
                       }
                       .build()
@@ -2563,6 +2545,9 @@ jobs:
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
+
+                  // Очистка только 1 раз при старте главного экрана (а не при каждом onResume)
+                  CacheManager.maybeCleanup(this)
 
                   b.btnRefresh.setOnClickListener {
                       CrashLogger.info("UI", "Кнопка Обновить")
@@ -2912,7 +2897,9 @@ jobs:
                       StreamCache.clearAll(this)
                       ChannelCache.clear(this)
                       ThumbCache.clear(this)
-                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      File(cacheDir, "image_cache").deleteRecursively()
+                      File(cacheDir, "doh_cache").deleteRecursively()
+                      File(cacheDir, "update.apk").delete()
                       Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
                       updateCacheInfo()
                       CrashLogger.info("Settings", "Кэш очищен вручную")
@@ -3050,7 +3037,9 @@ jobs:
                       val il = Coil.imageLoader(this)
                       il.diskCache?.clear()
                       il.memoryCache?.clear()
-                      cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                      File(cacheDir, "image_cache").deleteRecursively()
+                      File(cacheDir, "doh_cache").deleteRecursively()
+                      File(cacheDir, "update.apk").delete()
                       DohProvider.invalidate()
                       try { Coil.reset() } catch (_: Exception) {}
                       lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }
@@ -3094,12 +3083,12 @@ jobs:
                       val pythonSize = totalFiles - channelsCacheSize - logSize
 
                       val stats = buildString {
-                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 5 МБ")
+                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 3 МБ")
                           appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
                           appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
                           appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
                           appendLine("🐍 Python: ${formatSize(pythonSize)}")
-                          appendLine("📦 Cache всего: ${formatSize(totalCache)} / 10 МБ")
+                          appendLine("📦 Cache всего: ${formatSize(totalCache)}")
                           append("💾 Files всего: ${formatSize(totalFiles)} / 30 МБ")
                       }
                       b.txtCacheStats.text = stats
@@ -3218,15 +3207,6 @@ jobs:
                   b.btnBug.visibility = View.GONE
               }
               private val hideChannelOverlayRunnable = Runnable { b.channelNameOverlay.visibility = View.GONE }
-
-              private val showBufferingRunnable = Runnable {
-                  if (player?.playbackState == Player.STATE_BUFFERING && !hasBeenReady) {
-                      b.bufferingText.visibility = View.VISIBLE
-                  }
-              }
-              private val hideBufferingRunnable = Runnable {
-                  b.bufferingText.visibility = View.GONE
-              }
 
               private val stallChecker = object : Runnable {
                   override fun run() {
@@ -3401,7 +3381,7 @@ jobs:
                   val thumbPrefs = getSharedPreferences("thumb_cache", MODE_PRIVATE)
                   sb.appendLine("  thumb: ${thumbPrefs.all.size}/30")
                   val coilDisk = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                  sb.appendLine("  coil: ${formatBytes(coilDisk)} / 5 МБ")
+                  sb.appendLine("  coil: ${formatBytes(coilDisk)} / 3 МБ")
                   val logFile = File(filesDir, "app.log")
                   sb.appendLine("  log: ${formatBytes(if (logFile.exists()) logFile.length() else 0L)} / 200 КБ")
                   val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -3674,8 +3654,6 @@ jobs:
               private fun play(m3u8: String) {
                   player?.release()
                   handler.removeCallbacks(stallChecker)
-                  handler.removeCallbacks(showBufferingRunnable)
-                  handler.removeCallbacks(hideBufferingRunnable)
                   lastPlayerPosition = -1L
                   val dataSource = buildHttpDataSource()
                   val loadControl = DefaultLoadControl.Builder().setBufferDurationsMs(10000, 30000, 1500, 3000).build()
@@ -3688,17 +3666,15 @@ jobs:
                               when (state) {
                                   Player.STATE_BUFFERING -> {
                                       if (!hasBeenReady) {
-                                          handler.removeCallbacks(hideBufferingRunnable)
-                                          handler.postDelayed(showBufferingRunnable, 1500)
+                                          b.bufferingText.visibility = View.VISIBLE
+                                          b.progress.visibility = View.GONE // Скрываем круговой спиннер, чтобы не дублировался
                                       }
                                   }
                                   Player.STATE_READY -> {
                                       hasBeenReady = true
-                                      handler.removeCallbacks(showBufferingRunnable)
                                       b.bufferingText.visibility = View.GONE
                                   }
                                   Player.STATE_ENDED, Player.STATE_IDLE -> {
-                                      handler.removeCallbacks(showBufferingRunnable)
                                       b.bufferingText.visibility = View.GONE
                                   }
                               }
@@ -3766,7 +3742,6 @@ jobs:
 
               private fun handleError(errorText: String? = null, allowRetry: Boolean = true) {
                   handler.removeCallbacks(stallChecker)
-                  handler.removeCallbacks(showBufferingRunnable)
                   b.bufferingText.visibility = View.GONE
                   if (allowRetry && retryCount < MAX_RETRIES) {
                       retryCount++
@@ -3883,26 +3858,21 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🎯 **Финальные штрихи**
+            🎯 **Финальные штрихи (Стабильный релиз)**
+
+            **Исправлены песочные часы:**
+            - Теперь «⏳ Загрузка потока…» появляется **мгновенно** при старте канала (до первого `READY`). Не мигает при нормальном просмотре. Обычный круговой спиннер скрывается, чтобы не было двух индикаторов.
+
+            **Кэш и память:**
+            - `CacheManager` больше не удаляет всё подряд (не трогает буферы плеера). Чистит только `image_cache`, `doh_cache` и `update.apk`.
+            - Лимиты Coil уменьшены (3 МБ диск, 4 МБ память).
+            - Очистка кэша запускается только 1 раз при старте главного экрана, а не при каждом `onResume`.
 
             **Интерфейс и навигация:**
-            - 🐛 теперь доступна с пульта: «Заполнить» → вниз → ОК.
+            - 🐛 доступна с пульта: «Заполнить» → вниз → ОК.
             - Часы `HH:mm` в шапке главного меню.
             - Кнопка «Повторить» на экране ошибки загрузки каналов.
-
-            **Человеческие ошибки:**
-            - 📡 Нет сети
-            - ⏱ VK не отвечает
-            - 🚫 403/404
-            - 📺 Канал оффлайн
-            - 🔍 Поток не найден
-            - Вместо технических `ERROR[...]`.
-
-            **Стабильность и кэш:**
-            - `yt-dlp` больше не кэширует мусор (`cachedir=False`).
-            - `CacheManager` чистит принудительно при >15 МБ.
-            - TTL ссылок увеличен до 6 часов.
-            - Плашка «⏳ Загрузка» — через 1.5с, только при первом старте (не мигает).
+            - Человеческие ошибки (`📡 Нет сети`, `⏱ VK не отвечает` и т.д.).
 
             📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
