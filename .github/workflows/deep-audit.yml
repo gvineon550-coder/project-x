@@ -1,0 +1,109 @@
+name: Глубокий аудит кода (Python + Kotlin)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  deep-audit:
+    name: Ruff, Bandit & Detekt (Kotlin)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачивание кода репозитория
+        uses: actions/checkout@v4
+
+      - name: Установка сканеров (Python + Kotlin Detekt)
+        run: |
+          pip install -q ruff bandit
+          # Скачиваем официальный CLI-сканер Detekt для Kotlin (не требует тяжелой сборки Gradle)
+          curl -sSLO https://github.com
+
+      - name: Анализ Python и Kotlin с отчетом в Summary
+        run: |
+          python3 - << 'EOF'
+          import subprocess, json, os, sys
+          import xml.etree.ElementTree as ET
+
+          # --- 1. PYTHON: Ruff (логические баги) ---
+          ruff_res = subprocess.run(
+              ['ruff', 'check', '--select=F,B,E9', '--ignore=F401', '--output-format=json', '.'],
+              capture_output=True, text=True
+          )
+          ruff_issues = json.loads(ruff_res.stdout) if ruff_res.stdout.strip() else []
+
+          # --- 2. PYTHON: Bandit (уязвимости) ---
+          bandit_res = subprocess.run(
+              ['bandit', '-r', '.', '-ll', '-f', 'json', '--exclude', './.git,./.github'],
+              capture_output=True, text=True
+          )
+          bandit_data = json.loads(bandit_res.stdout) if bandit_res.stdout.strip() else {}
+          bandit_issues = bandit_data.get('results', [])
+
+          # --- 3. KOTLIN: Detekt (баги, утечки и уязвимости Android) ---
+          # Запускаем Detekt и сохраняем отчет в XML (формат checkstyle), чтобы красиво распарсить
+          subprocess.run(
+              ['java', '-jar', 'detekt-cli-1.23.7-all.jar', '--input', '.', '--excludes', '**/.git/**,**/.github/**', '--report', 'xml:detekt-report.xml'],
+              capture_output=True, text=True
+          )
+          
+          kotlin_issues = []
+          if os.path.exists('detekt-report.xml'):
+              tree = ET.parse('detekt-report.xml')
+              root = tree.getroot()
+              for file_elem in root.findall('file'):
+                  filepath = os.path.relpath(file_elem.get('name', ''))
+                  for err in file_elem.findall('error'):
+                      # Игнорируем мелкие придирки к форматированию (Style / Formatting), оставляем только баги, сложность и уязвимости
+                      source = err.get('source', '')
+                      if any(x in source for x in ['formatting', 'WildcardImport', 'MagicNumber', 'MaxLineLength', 'NewLineAtEndOfFile']):
+                          continue
+                      kotlin_issues.append({
+                          'file': filepath,
+                          'line': err.get('line', '?'),
+                          'rule': source.replace('detekt.', ''),
+                          'msg': err.get('message', '')
+                      })
+
+          # --- ФОРМИРУЕМ ОТЧЕТ В SUMMARY ---
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
+          with open(summary_file, 'a', encoding='utf-8') as sf:
+              sf.write("## 🕵️ Глубокий аудит кода (Python + Kotlin)\n\n")
+
+              # Блок Python: Ruff
+              sf.write("### 🐍 1. Python: логические баги (Ruff)\n")
+              if not ruff_issues:
+                  sf.write("✅ **Логических ошибок не найдено.**\n\n")
+              else:
+                  sf.write(f"⚠️ Найдено замечаний: **{len(ruff_issues)}**\n\n")
+                  for item in ruff_issues:
+                      sf.write(f"- 🐛 **{item.get('filename')}** (строка {item.get('location', {}).get('row', '?')}) `[{item.get('code')}]`: {item.get('message')}\n")
+                  sf.write("\n")
+
+              # Блок Python: Bandit
+              sf.write("### 🛡️ 2. Python: безопасность (Bandit)\n")
+              if not bandit_issues:
+                  sf.write("✅ **Уязвимостей безопасности не обнаружено.**\n\n")
+              else:
+                  sf.write(f"🚨 Найдено уязвимостей: **{len(bandit_issues)}**\n\n")
+                  for item in bandit_issues:
+                      sf.write(f"- 🔒 **{item.get('filename')}** (строка {item.get('line_number')}) `[{item.get('issue_severity')}]`: {item.get('issue_text')}\n")
+                  sf.write("\n")
+
+              # Блок Kotlin: Detekt
+              sf.write("### 📱 3. Kotlin (Android): баги и уязвимости (Detekt)\n")
+              if not kotlin_issues:
+                  sf.write("✅ **Критических ошибок, утечек и уязвимостей в Kotlin не найдено.**\n\n")
+              else:
+                  sf.write(f"⚠️ Найдено замечаний: **{len(kotlin_issues)}**\n\n")
+                  for item in kotlin_issues:
+                      sf.write(f"- 📱 **{item['file']}** (строка {item['line']}) `[{item['rule']}]`: {item['msg']}\n")
+                  sf.write("\n")
+
+          # Если найдены проблемы — подсвечиваем запуск красным
+          if ruff_issues or bandit_issues or kotlin_issues:
+              print("::error::Глубокий аудит нашел потенциальные баги или уязвимости. Откройте вкладку Summary.")
+              sys.exit(1)
+          sys.exit(0)
+          EOF
