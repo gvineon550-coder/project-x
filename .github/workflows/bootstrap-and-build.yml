@@ -1228,7 +1228,7 @@ jobs:
           import os
           import tempfile
 
-          # Перенаправляем временные файлы yt-dlp в изолированную папку, чтобы не засорять общий cacheDir
+          # Перенаправляем временные файлы yt-dlp в изолированную папку
           try:
               from java import jclass
               activity_thread = jclass("android.app.ActivityThread")
@@ -1631,6 +1631,7 @@ jobs:
           cat > app/src/main/java/com/tvplayer/app/CacheManager.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
+          import coil.Coil
           import java.io.File
 
           object CacheManager {
@@ -1660,8 +1661,9 @@ jobs:
 
               private fun performCleanup(context: Context) {
                   try {
-                      // 1. Удаляем строго определенные папки (без ExoPlayer)
-                      File(context.cacheDir, "image_cache").deleteRecursively()
+                      // Правильная очистка кэша картинок через Coil (без удаления папки вручную)
+                      try { Coil.imageLoader(context).diskCache?.clear() } catch (_: Exception) {}
+                      
                       File(context.cacheDir, "doh_cache").deleteRecursively()
                       File(context.cacheDir, "ytdlp_tmp").deleteRecursively()
                       File(context.cacheDir, "update.apk").delete()
@@ -1669,7 +1671,7 @@ jobs:
                       StreamCache.cleanup(context)
                       ThumbCache.evictIfNeeded(context)
 
-                      // 2. Удаляем старые файлы в cacheDir (>7 дней)
+                      // Удаляем старые файлы в cacheDir (>7 дней)
                       val sevenDays = 7L * 24 * 60 * 60 * 1000
                       val now = System.currentTimeMillis()
                       var oldRemoved = 0
@@ -1691,7 +1693,6 @@ jobs:
                           CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
                       }
 
-                      // 3. Считаем итоговые размеры
                       var cacheSize = 0L
                       context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
                       
@@ -2369,7 +2370,7 @@ jobs:
                       h.logo.load(ch.logo) {
                           crossfade(true)
                           size(120, 120)
-                          precision(Precision.INEXACT)
+                          precision(Precision.EXACT) // Важно: EXACT заставляет Coil сжимать картинку ДО сохранения на диск
                           placeholder(android.R.color.darker_gray)
                           error(android.R.color.darker_gray)
                       }
@@ -2515,6 +2516,7 @@ jobs:
           import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
           import androidx.lifecycle.lifecycleScope
           import androidx.recyclerview.widget.LinearLayoutManager
+          import coil.Coil
           import coil.ImageLoader
           import coil.ImageLoaderFactory
           import coil.disk.DiskCache
@@ -2570,6 +2572,20 @@ jobs:
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
+
+                  // Принудительно чистим старый раздутый кэш картинок при старте
+                  val imageCacheDir = cacheDir.resolve("image_cache")
+                  var currentCacheSize = 0L
+                  if (imageCacheDir.exists()) {
+                      currentCacheSize = imageCacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                  }
+                  if (currentCacheSize > 5 * 1024 * 1024) {
+                      try {
+                          Coil.imageLoader(this).diskCache?.clear()
+                          imageCacheDir.deleteRecursively()
+                          CrashLogger.info("Cleanup", "Принудительно очищен раздутый кэш картинок ($currentCacheSize байт)")
+                      } catch (_: Exception) {}
+                  }
 
                   // Очистка только 1 раз при старте главного экрана
                   CacheManager.maybeCleanup(this)
@@ -3892,20 +3908,18 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🎯 **Полное решение проблемы с кэшем**
+            🎯 **Исправлен баг с раздуванием кэша картинок (Coil)**
 
-            **Кэш (Cache) и Память:**
-            - **`yt-dlp` полностью изолирован.** Все временные файлы, которые он создает при разборе ссылок VK, теперь пишутся в отдельную папку `ytdlp_tmp` и **мгновенно удаляются** сразу после получения ссылки.
-            - `CacheManager` больше не сканирует и не удаляет системные файлы плеера. Кэш приложения будет чистым (не более 5 МБ).
-            - Уменьшены лимиты Coil (картинки): 3 МБ диск, 4 МБ память.
-
-            **Исправлены песочные часы (⏳):**
-            - Теперь плашка «Загрузка потока…» появляется **мгновенно** при переключении канала (пока идет резолв) и скрывается, как только видео начинает играть. Они больше не мигают при просмотре.
+            **Кэш и память:**
+            - Исправлен баг: Coil сохранял на диск оригиналы картинок (огромные файлы), игнорируя лимит. Теперь включен `Precision.EXACT`, картинки сжимаются перед записью на диск. Лимит в 3 МБ будет соблюдаться строго.
+            - При запуске приложение принудительно очистит старый раздутый кэш.
+            - `yt-dlp` изолирован в папке `ytdlp_tmp`, которая удаляется сразу после резолва.
 
             **Интерфейс:**
-            - 🐛 доступна с пульта: «Заполнить» → вниз → ОК.
-            - Человеческие ошибки и лог в норме.
+            - Плашка «⏳ Загрузка потока…» появляется мгновенно при старте канала.
+            - Кнопка 🐛 в плеере работает с пульта.
+            - Человеческие тексты ошибок.
 
-            📦 Скачайте APK и установите поверх старой. Приложение больше не будет раздувать кэш.
+            📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
