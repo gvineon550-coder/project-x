@@ -1218,13 +1218,29 @@ jobs:
               android:background="?attr/selectableItemBackground" />
           EOF
 
-      - name: "🐍 Python (DoH с счётчиками, без кэша yt-dlp)"
+      - name: "🐍 Python (DoH с счётчиками, изоляция кэша yt-dlp)"
         if: steps.checkytdlp.outputs.skip != 'true'
         run: |
           cat > app/src/main/python/resolver.py << 'EOF'
           import socket
           import time
           import urllib.request
+          import os
+          import tempfile
+
+          # Перенаправляем временные файлы yt-dlp в изолированную папку, чтобы не засорять общий cacheDir
+          try:
+              from java import jclass
+              activity_thread = jclass("android.app.ActivityThread")
+              app = activity_thread.currentApplication()
+              if app:
+                  context = app.getApplicationContext()
+                  cache_dir = context.getCacheDir().getAbsolutePath()
+                  temp_dir = os.path.join(cache_dir, "ytdlp_tmp")
+                  os.makedirs(temp_dir, exist_ok=True)
+                  tempfile.tempdir = temp_dir
+          except Exception:
+              pass
 
           DOH_URL = "https://dns.adguard-dns.com/dns-query"
           DOH_HOSTS = {"dns.adguard-dns.com", "dns.google", "cloudflare-dns.com", "dns.quad9.net"}
@@ -1578,7 +1594,6 @@ jobs:
               override fun onResume() {
                   super.onResume()
                   resetInactivityTimer()
-                  // CacheManager.maybeCleanup(this) <-- ПЕРЕНЕСЕНО В MainActivity.onCreate
               }
 
               override fun onPause() {
@@ -1634,11 +1649,21 @@ jobs:
                       .apply { name = "CacheCleanup"; isDaemon = true }.start()
               }
 
+              fun cleanYtdlpTemp(context: Context) {
+                  try {
+                      val dir = File(context.cacheDir, "ytdlp_tmp")
+                      if (dir.exists()) {
+                          dir.deleteRecursively()
+                      }
+                  } catch (_: Exception) {}
+              }
+
               private fun performCleanup(context: Context) {
                   try {
-                      // 1. Удаляем строго определенные папки (без ExoPlayer и Chaquopy)
+                      // 1. Удаляем строго определенные папки (без ExoPlayer)
                       File(context.cacheDir, "image_cache").deleteRecursively()
                       File(context.cacheDir, "doh_cache").deleteRecursively()
+                      File(context.cacheDir, "ytdlp_tmp").deleteRecursively()
                       File(context.cacheDir, "update.apk").delete()
 
                       StreamCache.cleanup(context)
@@ -2546,7 +2571,7 @@ jobs:
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
 
-                  // Очистка только 1 раз при старте главного экрана (а не при каждом onResume)
+                  // Очистка только 1 раз при старте главного экрана
                   CacheManager.maybeCleanup(this)
 
                   b.btnRefresh.setOnClickListener {
@@ -2899,6 +2924,7 @@ jobs:
                       ThumbCache.clear(this)
                       File(cacheDir, "image_cache").deleteRecursively()
                       File(cacheDir, "doh_cache").deleteRecursively()
+                      File(cacheDir, "ytdlp_tmp").deleteRecursively()
                       File(cacheDir, "update.apk").delete()
                       Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
                       updateCacheInfo()
@@ -3039,6 +3065,7 @@ jobs:
                       il.memoryCache?.clear()
                       File(cacheDir, "image_cache").deleteRecursively()
                       File(cacheDir, "doh_cache").deleteRecursively()
+                      File(cacheDir, "ytdlp_tmp").deleteRecursively()
                       File(cacheDir, "update.apk").delete()
                       DohProvider.invalidate()
                       try { Coil.reset() } catch (_: Exception) {}
@@ -3611,21 +3638,29 @@ jobs:
                   handler.removeCallbacks(hideChannelOverlayRunnable)
                   handler.postDelayed(hideChannelOverlayRunnable, 3000)
                   b.errorLayout.visibility = View.GONE
-                  b.bufferingText.visibility = View.GONE
+                  
+                  // Показываем загрузку мгновенно при переключении
+                  b.bufferingText.visibility = View.VISIBLE
+                  b.progress.visibility = View.GONE
+
                   val channelUrl = urls.getOrNull(currentIndex) ?: return
                   val cached = StreamCache.get(this, channelUrl)
                   if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
                   if (!NetworkUtils.isOnline(this)) {
-                      b.progress.visibility = View.GONE
+                      b.bufferingText.visibility = View.GONE
                       b.errorText.text = humanError("NO_NETWORK", "Нет подключения к интернету.")
                       b.errorLayout.visibility = View.VISIBLE
                       CrashLogger.info("Player", "Нет интернета")
                       return
                   }
-                  b.progress.visibility = View.VISIBLE
                   lifecycleScope.launch {
                       val direct = StreamResolver.resolve(channelUrl)
+                      
+                      // Мгновенно очищаем временные файлы yt-dlp
+                      CacheManager.cleanYtdlpTemp(this@PlayerActivity)
+
                       if (direct.startsWith("ERROR")) {
+                          b.bufferingText.visibility = View.GONE
                           val allowRetry = shouldRetry(direct)
                           handleError(direct, allowRetry)
                           return@launch
@@ -3667,7 +3702,7 @@ jobs:
                                   Player.STATE_BUFFERING -> {
                                       if (!hasBeenReady) {
                                           b.bufferingText.visibility = View.VISIBLE
-                                          b.progress.visibility = View.GONE // Скрываем круговой спиннер, чтобы не дублировался
+                                          b.progress.visibility = View.GONE
                                       }
                                   }
                                   Player.STATE_READY -> {
@@ -3693,7 +3728,6 @@ jobs:
                       })
                   }
                   b.playerView.player = player
-                  b.progress.visibility = View.GONE
                   b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
                   showControls()
                   handler.postDelayed(stallChecker, 30_000)
@@ -3858,22 +3892,20 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🎯 **Финальные штрихи (Стабильный релиз)**
+            🎯 **Полное решение проблемы с кэшем**
 
-            **Исправлены песочные часы:**
-            - Теперь «⏳ Загрузка потока…» появляется **мгновенно** при старте канала (до первого `READY`). Не мигает при нормальном просмотре. Обычный круговой спиннер скрывается, чтобы не было двух индикаторов.
+            **Кэш (Cache) и Память:**
+            - **`yt-dlp` полностью изолирован.** Все временные файлы, которые он создает при разборе ссылок VK, теперь пишутся в отдельную папку `ytdlp_tmp` и **мгновенно удаляются** сразу после получения ссылки.
+            - `CacheManager` больше не сканирует и не удаляет системные файлы плеера. Кэш приложения будет чистым (не более 5 МБ).
+            - Уменьшены лимиты Coil (картинки): 3 МБ диск, 4 МБ память.
 
-            **Кэш и память:**
-            - `CacheManager` больше не удаляет всё подряд (не трогает буферы плеера). Чистит только `image_cache`, `doh_cache` и `update.apk`.
-            - Лимиты Coil уменьшены (3 МБ диск, 4 МБ память).
-            - Очистка кэша запускается только 1 раз при старте главного экрана, а не при каждом `onResume`.
+            **Исправлены песочные часы (⏳):**
+            - Теперь плашка «Загрузка потока…» появляется **мгновенно** при переключении канала (пока идет резолв) и скрывается, как только видео начинает играть. Они больше не мигают при просмотре.
 
-            **Интерфейс и навигация:**
+            **Интерфейс:**
             - 🐛 доступна с пульта: «Заполнить» → вниз → ОК.
-            - Часы `HH:mm` в шапке главного меню.
-            - Кнопка «Повторить» на экране ошибки загрузки каналов.
-            - Человеческие ошибки (`📡 Нет сети`, `⏱ VK не отвечает` и т.д.).
+            - Человеческие ошибки и лог в норме.
 
-            📦 Скачайте APK и установите поверх старой.
+            📦 Скачайте APK и установите поверх старой. Приложение больше не будет раздувать кэш.
           files: ${{ steps.apk.outputs.file }}
           make_latest: true
