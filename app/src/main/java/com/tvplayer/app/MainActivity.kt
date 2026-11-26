@@ -73,7 +73,7 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
 
-        // Очистка только 1 раз при старте главного экрана (а не при каждом onResume)
+        // Очистка только 1 раз при старте главного экрана
         CacheManager.maybeCleanup(this)
 
         b.btnRefresh.setOnClickListener {

@@ -1,6 +1,22 @@
 import socket
 import time
 import urllib.request
+import os
+import tempfile
+
+# Перенаправляем временные файлы yt-dlp в изолированную папку, чтобы не засорять общий cacheDir
+try:
+    from java import jclass
+    activity_thread = jclass("android.app.ActivityThread")
+    app = activity_thread.currentApplication()
+    if app:
+        context = app.getApplicationContext()
+        cache_dir = context.getCacheDir().getAbsolutePath()
+        temp_dir = os.path.join(cache_dir, "ytdlp_tmp")
+        os.makedirs(temp_dir, exist_ok=True)
+        tempfile.tempdir = temp_dir
+except Exception:
+    pass
 
 DOH_URL = "https://dns.adguard-dns.com/dns-query"
 DOH_HOSTS = {"dns.adguard-dns.com", "dns.google", "cloudflare-dns.com", "dns.quad9.net"}

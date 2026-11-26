@@ -70,6 +70,7 @@ class SettingsActivity : BaseActivity() {
             ThumbCache.clear(this)
             File(cacheDir, "image_cache").deleteRecursively()
             File(cacheDir, "doh_cache").deleteRecursively()
+            File(cacheDir, "ytdlp_tmp").deleteRecursively()
             File(cacheDir, "update.apk").delete()
             Toast.makeText(this, "Кэш очищен", Toast.LENGTH_SHORT).show()
             updateCacheInfo()
@@ -210,6 +211,7 @@ class SettingsActivity : BaseActivity() {
             il.memoryCache?.clear()
             File(cacheDir, "image_cache").deleteRecursively()
             File(cacheDir, "doh_cache").deleteRecursively()
+            File(cacheDir, "ytdlp_tmp").deleteRecursively()
             File(cacheDir, "update.apk").delete()
             DohProvider.invalidate()
             try { Coil.reset() } catch (_: Exception) {}

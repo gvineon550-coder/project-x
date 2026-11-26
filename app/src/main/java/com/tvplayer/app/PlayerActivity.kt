@@ -465,21 +465,29 @@ class PlayerActivity : BaseActivity() {
         handler.removeCallbacks(hideChannelOverlayRunnable)
         handler.postDelayed(hideChannelOverlayRunnable, 3000)
         b.errorLayout.visibility = View.GONE
-        b.bufferingText.visibility = View.GONE
+        
+        // Показываем загрузку мгновенно при переключении
+        b.bufferingText.visibility = View.VISIBLE
+        b.progress.visibility = View.GONE
+
         val channelUrl = urls.getOrNull(currentIndex) ?: return
         val cached = StreamCache.get(this, channelUrl)
         if (cached != null) { CrashLogger.info("Player", "Кэш ссылки"); play(cached); return }
         if (!NetworkUtils.isOnline(this)) {
-            b.progress.visibility = View.GONE
+            b.bufferingText.visibility = View.GONE
             b.errorText.text = humanError("NO_NETWORK", "Нет подключения к интернету.")
             b.errorLayout.visibility = View.VISIBLE
             CrashLogger.info("Player", "Нет интернета")
             return
         }
-        b.progress.visibility = View.VISIBLE
         lifecycleScope.launch {
             val direct = StreamResolver.resolve(channelUrl)
+            
+            // Мгновенно очищаем временные файлы yt-dlp
+            CacheManager.cleanYtdlpTemp(this@PlayerActivity)
+
             if (direct.startsWith("ERROR")) {
+                b.bufferingText.visibility = View.GONE
                 val allowRetry = shouldRetry(direct)
                 handleError(direct, allowRetry)
                 return@launch
@@ -521,7 +529,7 @@ class PlayerActivity : BaseActivity() {
                         Player.STATE_BUFFERING -> {
                             if (!hasBeenReady) {
                                 b.bufferingText.visibility = View.VISIBLE
-                                b.progress.visibility = View.GONE // Скрываем круговой спиннер, чтобы не дублировался
+                                b.progress.visibility = View.GONE
                             }
                         }
                         Player.STATE_READY -> {
@@ -547,7 +555,6 @@ class PlayerActivity : BaseActivity() {
             })
         }
         b.playerView.player = player
-        b.progress.visibility = View.GONE
         b.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
         showControls()
         handler.postDelayed(stallChecker, 30_000)

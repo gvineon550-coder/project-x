@@ -18,11 +18,21 @@ object CacheManager {
             .apply { name = "CacheCleanup"; isDaemon = true }.start()
     }
 
+    fun cleanYtdlpTemp(context: Context) {
+        try {
+            val dir = File(context.cacheDir, "ytdlp_tmp")
+            if (dir.exists()) {
+                dir.deleteRecursively()
+            }
+        } catch (_: Exception) {}
+    }
+
     private fun performCleanup(context: Context) {
         try {
-            // 1. Удаляем строго определенные папки (без ExoPlayer и Chaquopy)
+            // 1. Удаляем строго определенные папки (без ExoPlayer)
             File(context.cacheDir, "image_cache").deleteRecursively()
             File(context.cacheDir, "doh_cache").deleteRecursively()
+            File(context.cacheDir, "ytdlp_tmp").deleteRecursively()
             File(context.cacheDir, "update.apk").delete()
 
             StreamCache.cleanup(context)
