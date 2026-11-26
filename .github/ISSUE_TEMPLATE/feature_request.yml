@@ -1,0 +1,24 @@
+name: 🚀 Идея или улучшение
+description: Предложить новую функцию для следующих версий
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что нужно добавить или улучшить?
+      description: Опишите новую функцию или изменение в интерфейсе.
+      placeholder: Добавить темную тему или уведомление при завершении загрузки...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Приоритет
+      options:
+        - 🔥 Сделать в первую очередь
+        - 👌 Было бы полезно
+        - 💡 Просто идея на будущее
+    validations:
+      required: false
