@@ -4,7 +4,7 @@ import urllib.request
 import os
 import tempfile
 
-# Перенаправляем временные файлы yt-dlp в изолированную папку, чтобы не засорять общий cacheDir
+# Перенаправляем временные файлы yt-dlp в изолированную папку
 try:
     from java import jclass
     activity_thread = jclass("android.app.ActivityThread")

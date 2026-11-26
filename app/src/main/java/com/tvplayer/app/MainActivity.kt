@@ -17,6 +17,7 @@ import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import coil.Coil
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -72,6 +73,20 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
+
+        // Принудительно чистим старый раздутый кэш картинок при старте
+        val imageCacheDir = cacheDir.resolve("image_cache")
+        var currentCacheSize = 0L
+        if (imageCacheDir.exists()) {
+            currentCacheSize = imageCacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+        if (currentCacheSize > 5 * 1024 * 1024) {
+            try {
+                Coil.imageLoader(this).diskCache?.clear()
+                imageCacheDir.deleteRecursively()
+                CrashLogger.info("Cleanup", "Принудительно очищен раздутый кэш картинок ($currentCacheSize байт)")
+            } catch (_: Exception) {}
+        }
 
         // Очистка только 1 раз при старте главного экрана
         CacheManager.maybeCleanup(this)

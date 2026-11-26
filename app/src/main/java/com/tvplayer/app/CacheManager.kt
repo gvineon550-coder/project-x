@@ -1,5 +1,6 @@
 package com.tvplayer.app
 import android.content.Context
+import coil.Coil
 import java.io.File
 
 object CacheManager {
@@ -29,8 +30,9 @@ object CacheManager {
 
     private fun performCleanup(context: Context) {
         try {
-            // 1. Удаляем строго определенные папки (без ExoPlayer)
-            File(context.cacheDir, "image_cache").deleteRecursively()
+            // Правильная очистка кэша картинок через Coil (без удаления папки вручную)
+            try { Coil.imageLoader(context).diskCache?.clear() } catch (_: Exception) {}
+            
             File(context.cacheDir, "doh_cache").deleteRecursively()
             File(context.cacheDir, "ytdlp_tmp").deleteRecursively()
             File(context.cacheDir, "update.apk").delete()
@@ -38,7 +40,7 @@ object CacheManager {
             StreamCache.cleanup(context)
             ThumbCache.evictIfNeeded(context)
 
-            // 2. Удаляем старые файлы в cacheDir (>7 дней)
+            // Удаляем старые файлы в cacheDir (>7 дней)
             val sevenDays = 7L * 24 * 60 * 60 * 1000
             val now = System.currentTimeMillis()
             var oldRemoved = 0
@@ -60,7 +62,6 @@ object CacheManager {
                 CrashLogger.info("Cleanup", "Удалено $oldRemoved старых файлов (${oldBytes/1024}КБ)")
             }
 
-            // 3. Считаем итоговые размеры
             var cacheSize = 0L
             context.cacheDir.walkTopDown().forEach { if (it.isFile) cacheSize += it.length() }
             
