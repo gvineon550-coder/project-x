@@ -1,0 +1,102 @@
+name: Проверка всех файлов на ошибки
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  universal-syntax-check:
+    name: Проверка синтаксиса (Python, JSON, YAML, XML, SH)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачивание файлов репозитория
+        uses: actions/checkout@v4
+
+      - name: Запуск универсальной проверки файлов
+        run: |
+          python3 - << 'EOF'
+          import os, ast, json, subprocess, sys
+
+          errors = []
+          checked_count = 0
+
+          # Проходим по всем папкам репозитория (кроме служебной .git)
+          for root, dirs, files in os.walk('.'):
+              if '.git' in dirs:
+                  dirs.remove('.git')
+              
+              for file in files:
+                  path = os.path.join(root, file)
+                  ext = os.path.splitext(file)[1].lower()
+
+                  # 1. Проверка Python (.py)
+                  if ext == '.py':
+                      checked_count += 1
+                      try:
+                          with open(path, 'r', encoding='utf-8') as f:
+                              ast.parse(f.read(), filename=path)
+                      except SyntaxError as e:
+                          errors.append(f"🐍 **{path}** (строка {e.lineno}): Ошибка синтаксиса Python -> `{e.msg}`")
+                      except Exception as e:
+                          errors.append(f"🐍 **{path}**: Ошибка чтения -> `{e}`")
+
+                  # 2. Проверка JSON (.json)
+                  elif ext == '.json':
+                      checked_count += 1
+                      try:
+                          with open(path, 'r', encoding='utf-8') as f:
+                              json.load(f)
+                      except json.JSONDecodeError as e:
+                          errors.append(f"📋 **{path}** (строка {e.lineno}, столбец {e.colno}): Ошибка в JSON -> `{e.msg}`")
+
+                  # 3. Проверка XML (.xml — например, AndroidManifest.xml или разметка)
+                  elif ext == '.xml':
+                      checked_count += 1
+                      import xml.etree.ElementTree as ET
+                      try:
+                          ET.parse(path)
+                      except ET.ParseError as e:
+                          errors.append(f"📱 **{path}**: Ошибка в XML-разметке -> `{e}`")
+
+                  # 4. Проверка Shell-скриптов (.sh)
+                  elif ext == '.sh':
+                      checked_count += 1
+                      res = subprocess.run(['bash', '-n', path], capture_output=True, text=True)
+                      if res.returncode != 0:
+                          errors.append(f"💻 **{path}**: Ошибка в bash-скрипте -> `{res.stderr.strip()}`")
+
+          # 5. Отдельная проверка всех YAML файлов (.yml, .yaml)
+          subprocess.run(['pip', 'install', '-q', 'pyyaml'], check=True)
+          import yaml
+          for root, dirs, files in os.walk('.'):
+              if '.git' in dirs:
+                  dirs.remove('.git')
+              for file in files:
+                  if file.lower().endswith(('.yml', '.yaml')):
+                      path = os.path.join(root, file)
+                      checked_count += 1
+                      try:
+                          with open(path, 'r', encoding='utf-8') as f:
+                              list(yaml.safe_load_all(f))
+                      except yaml.YAMLError as e:
+                          line = e.problem_mark.line + 1 if hasattr(e, 'problem_mark') and e.problem_mark else '?'
+                          errors.append(f"⚙️ **{path}** (строка {line}): Ошибка отступов или синтаксиса YAML -> `{e.problem if hasattr(e, 'problem') else e}`")
+
+          # Записываем красивый отчет в Summary
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
+          with open(summary_file, 'a', encoding='utf-8') as sf:
+              sf.write("## 🔍 Отчет проверки файлов на ошибки\n\n")
+              sf.write(f"Проверено файлов (Python, JSON, YAML, XML, SH): **{checked_count}**\n\n")
+              
+              if not errors:
+                  sf.write("✅ **Все файлы в порядке! Синтаксических ошибок и опечаток не найдено.**\n")
+                  sys.exit(0)
+              else:
+                  sf.write("🚨 **Найдены ошибки в следующих файлах:**\n\n")
+                  for err in errors:
+                      sf.write(f"- {err}\n")
+                      print(f"::error::{err}")
+                  sys.exit(1)
+          EOF
