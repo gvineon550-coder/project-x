@@ -107,7 +107,15 @@ class PlayerActivity : BaseActivity() {
         b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; hasBeenReady = false; startPlayback() }
         b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
         b.btnShowLog.setOnClickListener { showLogDialog() }
-        b.btnBug.setOnClickListener { showDebugPanel() }
+        
+        // Жучок работает как toggle
+        b.btnBug.setOnClickListener {
+            if (b.debugPanel.visibility == View.VISIBLE) {
+                hideDebugPanel()
+            } else {
+                showDebugPanel()
+            }
+        }
 
         b.btnDebugClose.setOnClickListener { hideDebugPanel() }
         b.btnDebugRefresh.setOnClickListener {
@@ -145,7 +153,7 @@ class PlayerActivity : BaseActivity() {
         b.rightControls.visibility = View.GONE
         b.btnSleepTimer.visibility = View.GONE
         b.leftControls.visibility = View.GONE
-        b.btnBug.visibility = View.GONE
+        // btnBug не скрываем, чтобы можно было нажать второй раз
         b.debugText.text = buildDebugText()
         b.btnDebugClose.requestFocus()
         startDebugUpdater()
@@ -234,8 +242,7 @@ class PlayerActivity : BaseActivity() {
         sb.appendLine("  stream: ${streamPrefs.all.size}/120")
         val thumbPrefs = getSharedPreferences("thumb_cache", MODE_PRIVATE)
         sb.appendLine("  thumb: ${thumbPrefs.all.size}/30")
-        val coilDisk = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        sb.appendLine("  coil: ${formatBytes(coilDisk)} / 3 МБ")
+        sb.appendLine("  coil: отключен (RAM)")
         val logFile = File(filesDir, "app.log")
         sb.appendLine("  log: ${formatBytes(if (logFile.exists()) logFile.length() else 0L)} / 200 КБ")
         val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -384,9 +391,15 @@ class PlayerActivity : BaseActivity() {
             onUserInteraction()
         }
         if (b.debugPanel.visibility == View.VISIBLE) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
-                hideDebugPanel()
-                return true
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                    hideDebugPanel()
+                    return true
+                }
+                if (currentFocus?.id == R.id.btnBug && (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
+                    hideDebugPanel()
+                    return true
+                }
             }
             return super.dispatchKeyEvent(event)
         }

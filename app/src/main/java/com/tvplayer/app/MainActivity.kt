@@ -17,20 +17,13 @@ import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import coil.Coil
-import coil.ImageLoader
-import coil.ImageLoaderFactory
-import coil.disk.DiskCache
-import coil.memory.MemoryCache
 import com.tvplayer.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
 import org.json.JSONObject
 import java.io.File
 import java.util.Calendar
-import java.util.concurrent.TimeUnit
 
-class MainActivity : BaseActivity(), ImageLoaderFactory {
+class MainActivity : BaseActivity() {
     private lateinit var b: ActivityMainBinding
     private var allChannels: List<Channel> = emptyList()
     private var showOnlyFavorites = false
@@ -46,49 +39,17 @@ class MainActivity : BaseActivity(), ImageLoaderFactory {
         }
     }
 
-    override fun newImageLoader(): ImageLoader {
-        val dohOkHttp = OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .dns(DohProvider.createWithFallback(this))
-            .build()
-        return ImageLoader.Builder(this)
-            .okHttpClient(dohOkHttp)
-            .diskCache {
-                DiskCache.Builder()
-                    .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(3L * 1024L * 1024L) // Уменьшено до 3 МБ
-                    .build()
-            }
-            .memoryCache {
-                MemoryCache.Builder(this)
-                    .maxSizeBytes(4 * 1024 * 1024) // Уменьшено до 4 МБ
-                    .build()
-            }
-            .build()
-    }
-
     override fun onCreate(s: Bundle?) {
         installSplashScreen()
         super.onCreate(s)
         b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
         b.recycler.layoutManager = LinearLayoutManager(this)
 
-        // Принудительно чистим старый раздутый кэш картинок при старте
-        val imageCacheDir = cacheDir.resolve("image_cache")
-        var currentCacheSize = 0L
-        if (imageCacheDir.exists()) {
-            currentCacheSize = imageCacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        }
-        if (currentCacheSize > 5 * 1024 * 1024) {
-            try {
-                Coil.imageLoader(this).diskCache?.clear()
-                imageCacheDir.deleteRecursively()
-                CrashLogger.info("Cleanup", "Принудительно очищен раздутый кэш картинок ($currentCacheSize байт)")
-            } catch (_: Exception) {}
-        }
+        // Принудительно удаляем папку с кэшем картинок при старте
+        File(cacheDir, "image_cache").deleteRecursively()
+        CrashLogger.info("MainActivity", "Папка image_cache принудительно удалена (кэш отключен)")
 
-        // Очистка только 1 раз при старте главного экрана
+        // Очистка 1 раз при старте главного экрана
         CacheManager.maybeCleanup(this)
 
         b.btnRefresh.setOnClickListener {

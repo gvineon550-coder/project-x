@@ -25,7 +25,7 @@ class ChannelAdapter(
             h.logo.load(ch.logo) {
                 crossfade(true)
                 size(120, 120)
-                precision(Precision.EXACT) // Важно: EXACT заставляет Coil сжимать картинку ДО сохранения на диск
+                precision(Precision.INEXACT) // ИСПОЛЬЗУЕМ INEXACT для экономии памяти
                 placeholder(android.R.color.darker_gray)
                 error(android.R.color.darker_gray)
             }

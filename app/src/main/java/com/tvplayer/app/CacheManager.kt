@@ -1,6 +1,5 @@
 package com.tvplayer.app
 import android.content.Context
-import coil.Coil
 import java.io.File
 
 object CacheManager {
@@ -30,8 +29,8 @@ object CacheManager {
 
     private fun performCleanup(context: Context) {
         try {
-            // Правильная очистка кэша картинок через Coil (без удаления папки вручную)
-            try { Coil.imageLoader(context).diskCache?.clear() } catch (_: Exception) {}
+            // Правильная очистка кэша картинок
+            File(context.cacheDir, "image_cache").deleteRecursively()
             
             File(context.cacheDir, "doh_cache").deleteRecursively()
             File(context.cacheDir, "ytdlp_tmp").deleteRecursively()

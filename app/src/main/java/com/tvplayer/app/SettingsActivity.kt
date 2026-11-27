@@ -11,7 +11,6 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
-import coil.Coil
 import com.tvplayer.app.databinding.ActivitySettingsBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -62,9 +61,6 @@ class SettingsActivity : BaseActivity() {
         b.btnToggleDoh.setOnClickListener { toggleDoh() }
 
         b.btnClearCache.setOnClickListener {
-            val imageLoader = Coil.imageLoader(this)
-            imageLoader.diskCache?.clear()
-            imageLoader.memoryCache?.clear()
             StreamCache.clearAll(this)
             ChannelCache.clear(this)
             ThumbCache.clear(this)
@@ -129,17 +125,9 @@ class SettingsActivity : BaseActivity() {
             DohSettings.setEnabled(this@SettingsActivity, newState)
             val pyOk = withContext(Dispatchers.IO) { syncPythonDohFlag(newState) }
 
-            try {
-                Coil.reset()
-                CrashLogger.info("DoH", "Coil.reset() — ImageLoader пересоздан с новым состоянием")
-            } catch (e: Exception) {
-                CrashLogger.error("DoH", "Coil.reset() не удался", e)
-            }
-
             if (!pyOk) {
                 DohSettings.setEnabled(this@SettingsActivity, !newState)
                 if (!newState) DohProvider.invalidate()
-                try { Coil.reset() } catch (_: Exception) {}
                 updateDohToggleUI()
                 Toast.makeText(
                     this@SettingsActivity,
@@ -206,15 +194,11 @@ class SettingsActivity : BaseActivity() {
             ChannelCache.clear(this)
             ThumbCache.clear(this)
             CrashLogger.clear(this)
-            val il = Coil.imageLoader(this)
-            il.diskCache?.clear()
-            il.memoryCache?.clear()
             File(cacheDir, "image_cache").deleteRecursively()
             File(cacheDir, "doh_cache").deleteRecursively()
             File(cacheDir, "ytdlp_tmp").deleteRecursively()
             File(cacheDir, "update.apk").delete()
             DohProvider.invalidate()
-            try { Coil.reset() } catch (_: Exception) {}
             lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }
             updateDohToggleUI()
             Toast.makeText(this, "Полный сброс выполнен (DoH включён)", Toast.LENGTH_SHORT).show()
@@ -256,7 +240,7 @@ class SettingsActivity : BaseActivity() {
             val pythonSize = totalFiles - channelsCacheSize - logSize
 
             val stats = buildString {
-                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 3 МБ")
+                appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / отключен")
                 appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
                 appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
                 appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")

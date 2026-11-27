@@ -1,9 +1,32 @@
 package com.tvplayer.app
+import android.content.Context
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.memory.MemoryCache
 import com.chaquo.python.Python
 import com.chaquo.python.android.PyApplication
+import okhttp3.OkHttpClient
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
-class TVPlayerApp : PyApplication() {
+class TVPlayerApp : PyApplication(), ImageLoaderFactory {
+    override fun newImageLoader(): ImageLoader {
+        val dohOkHttp = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .dns(DohProvider.createWithFallback(this))
+            .build()
+        return ImageLoader.Builder(this)
+            .okHttpClient(dohOkHttp)
+            .diskCache(null) // Полностью отключаем дисковый кэш
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizeBytes(8 * 1024 * 1024) // 8 МБ для ~1000 картинок
+                    .build()
+            }
+            .build()
+    }
+
     override fun onCreate() {
         super.onCreate()
         CrashLogger.init(this)
