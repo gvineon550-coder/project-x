@@ -1631,7 +1631,6 @@ jobs:
           cat > app/src/main/java/com/tvplayer/app/CacheManager.kt << 'EOF'
           package com.tvplayer.app
           import android.content.Context
-          import coil.Coil
           import java.io.File
 
           object CacheManager {
@@ -1661,8 +1660,8 @@ jobs:
 
               private fun performCleanup(context: Context) {
                   try {
-                      // Правильная очистка кэша картинок через Coil (без удаления папки вручную)
-                      try { Coil.imageLoader(context).diskCache?.clear() } catch (_: Exception) {}
+                      // Правильная очистка кэша картинок
+                      File(context.cacheDir, "image_cache").deleteRecursively()
                       
                       File(context.cacheDir, "doh_cache").deleteRecursively()
                       File(context.cacheDir, "ytdlp_tmp").deleteRecursively()
@@ -1718,11 +1717,34 @@ jobs:
 
           cat > app/src/main/java/com/tvplayer/app/TVPlayerApp.kt << 'EOF'
           package com.tvplayer.app
+          import android.content.Context
+          import coil.ImageLoader
+          import coil.ImageLoaderFactory
+          import coil.memory.MemoryCache
           import com.chaquo.python.Python
           import com.chaquo.python.android.PyApplication
+          import okhttp3.OkHttpClient
           import java.util.UUID
+          import java.util.concurrent.TimeUnit
 
-          class TVPlayerApp : PyApplication() {
+          class TVPlayerApp : PyApplication(), ImageLoaderFactory {
+              override fun newImageLoader(): ImageLoader {
+                  val dohOkHttp = OkHttpClient.Builder()
+                      .connectTimeout(10, TimeUnit.SECONDS)
+                      .readTimeout(20, TimeUnit.SECONDS)
+                      .dns(DohProvider.createWithFallback(this))
+                      .build()
+                  return ImageLoader.Builder(this)
+                      .okHttpClient(dohOkHttp)
+                      .diskCache(null) // Полностью отключаем дисковый кэш
+                      .memoryCache {
+                          MemoryCache.Builder(this)
+                              .maxSizeBytes(8 * 1024 * 1024) // 8 МБ для ~1000 картинок
+                              .build()
+                      }
+                      .build()
+              }
+
               override fun onCreate() {
                   super.onCreate()
                   CrashLogger.init(this)
@@ -2370,7 +2392,7 @@ jobs:
                       h.logo.load(ch.logo) {
                           crossfade(true)
                           size(120, 120)
-                          precision(Precision.EXACT) // Важно: EXACT заставляет Coil сжимать картинку ДО сохранения на диск
+                          precision(Precision.INEXACT) // ИСПОЛЬЗУЕМ INEXACT для экономии памяти
                           placeholder(android.R.color.darker_gray)
                           error(android.R.color.darker_gray)
                       }
@@ -2516,20 +2538,13 @@ jobs:
           import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
           import androidx.lifecycle.lifecycleScope
           import androidx.recyclerview.widget.LinearLayoutManager
-          import coil.Coil
-          import coil.ImageLoader
-          import coil.ImageLoaderFactory
-          import coil.disk.DiskCache
-          import coil.memory.MemoryCache
           import com.tvplayer.app.databinding.ActivityMainBinding
           import kotlinx.coroutines.launch
-          import okhttp3.OkHttpClient
           import org.json.JSONObject
           import java.io.File
           import java.util.Calendar
-          import java.util.concurrent.TimeUnit
 
-          class MainActivity : BaseActivity(), ImageLoaderFactory {
+          class MainActivity : BaseActivity() {
               private lateinit var b: ActivityMainBinding
               private var allChannels: List<Channel> = emptyList()
               private var showOnlyFavorites = false
@@ -2545,49 +2560,17 @@ jobs:
                   }
               }
 
-              override fun newImageLoader(): ImageLoader {
-                  val dohOkHttp = OkHttpClient.Builder()
-                      .connectTimeout(10, TimeUnit.SECONDS)
-                      .readTimeout(20, TimeUnit.SECONDS)
-                      .dns(DohProvider.createWithFallback(this))
-                      .build()
-                  return ImageLoader.Builder(this)
-                      .okHttpClient(dohOkHttp)
-                      .diskCache {
-                          DiskCache.Builder()
-                              .directory(cacheDir.resolve("image_cache"))
-                              .maxSizeBytes(3L * 1024L * 1024L) // Уменьшено до 3 МБ
-                              .build()
-                      }
-                      .memoryCache {
-                          MemoryCache.Builder(this)
-                              .maxSizeBytes(4 * 1024 * 1024) // Уменьшено до 4 МБ
-                              .build()
-                      }
-                      .build()
-              }
-
               override fun onCreate(s: Bundle?) {
                   installSplashScreen()
                   super.onCreate(s)
                   b = ActivityMainBinding.inflate(layoutInflater); setContentView(b.root)
                   b.recycler.layoutManager = LinearLayoutManager(this)
 
-                  // Принудительно чистим старый раздутый кэш картинок при старте
-                  val imageCacheDir = cacheDir.resolve("image_cache")
-                  var currentCacheSize = 0L
-                  if (imageCacheDir.exists()) {
-                      currentCacheSize = imageCacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                  }
-                  if (currentCacheSize > 5 * 1024 * 1024) {
-                      try {
-                          Coil.imageLoader(this).diskCache?.clear()
-                          imageCacheDir.deleteRecursively()
-                          CrashLogger.info("Cleanup", "Принудительно очищен раздутый кэш картинок ($currentCacheSize байт)")
-                      } catch (_: Exception) {}
-                  }
+                  // Принудительно удаляем папку с кэшем картинок при старте
+                  File(cacheDir, "image_cache").deleteRecursively()
+                  CrashLogger.info("MainActivity", "Папка image_cache принудительно удалена (кэш отключен)")
 
-                  // Очистка только 1 раз при старте главного экрана
+                  // Очистка 1 раз при старте главного экрана
                   CacheManager.maybeCleanup(this)
 
                   b.btnRefresh.setOnClickListener {
@@ -2881,7 +2864,6 @@ jobs:
           import android.widget.Toast
           import androidx.core.content.FileProvider
           import androidx.lifecycle.lifecycleScope
-          import coil.Coil
           import com.tvplayer.app.databinding.ActivitySettingsBinding
           import kotlinx.coroutines.Dispatchers
           import kotlinx.coroutines.launch
@@ -2932,9 +2914,6 @@ jobs:
                   b.btnToggleDoh.setOnClickListener { toggleDoh() }
 
                   b.btnClearCache.setOnClickListener {
-                      val imageLoader = Coil.imageLoader(this)
-                      imageLoader.diskCache?.clear()
-                      imageLoader.memoryCache?.clear()
                       StreamCache.clearAll(this)
                       ChannelCache.clear(this)
                       ThumbCache.clear(this)
@@ -2999,17 +2978,9 @@ jobs:
                       DohSettings.setEnabled(this@SettingsActivity, newState)
                       val pyOk = withContext(Dispatchers.IO) { syncPythonDohFlag(newState) }
 
-                      try {
-                          Coil.reset()
-                          CrashLogger.info("DoH", "Coil.reset() — ImageLoader пересоздан с новым состоянием")
-                      } catch (e: Exception) {
-                          CrashLogger.error("DoH", "Coil.reset() не удался", e)
-                      }
-
                       if (!pyOk) {
                           DohSettings.setEnabled(this@SettingsActivity, !newState)
                           if (!newState) DohProvider.invalidate()
-                          try { Coil.reset() } catch (_: Exception) {}
                           updateDohToggleUI()
                           Toast.makeText(
                               this@SettingsActivity,
@@ -3076,15 +3047,11 @@ jobs:
                       ChannelCache.clear(this)
                       ThumbCache.clear(this)
                       CrashLogger.clear(this)
-                      val il = Coil.imageLoader(this)
-                      il.diskCache?.clear()
-                      il.memoryCache?.clear()
                       File(cacheDir, "image_cache").deleteRecursively()
                       File(cacheDir, "doh_cache").deleteRecursively()
                       File(cacheDir, "ytdlp_tmp").deleteRecursively()
                       File(cacheDir, "update.apk").delete()
                       DohProvider.invalidate()
-                      try { Coil.reset() } catch (_: Exception) {}
                       lifecycleScope.launch(Dispatchers.IO) { syncPythonDohFlag(true) }
                       updateDohToggleUI()
                       Toast.makeText(this, "Полный сброс выполнен (DoH включён)", Toast.LENGTH_SHORT).show()
@@ -3126,7 +3093,7 @@ jobs:
                       val pythonSize = totalFiles - channelsCacheSize - logSize
 
                       val stats = buildString {
-                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / 3 МБ")
+                          appendLine("🖼 Кэш картинок: ${formatSize(imageCacheSize)} / отключен")
                           appendLine("📋 Кэш списка: ${formatSize(channelsCacheSize)}")
                           appendLine("🔗 Кэш ссылок: ${formatSize(streamSize)} (${streamPrefs.all.size}/120)")
                           appendLine("📝 Лог: ${formatSize(logSize)} / 200 КБ")
@@ -3296,7 +3263,15 @@ jobs:
                   b.btnRetry.setOnClickListener { b.errorLayout.visibility = View.GONE; retryCount = 0; hasBeenReady = false; startPlayback() }
                   b.btnAspect.setOnClickListener { toggleAspect(); resetHideTimeout() }
                   b.btnShowLog.setOnClickListener { showLogDialog() }
-                  b.btnBug.setOnClickListener { showDebugPanel() }
+                  
+                  // Жучок работает как toggle
+                  b.btnBug.setOnClickListener {
+                      if (b.debugPanel.visibility == View.VISIBLE) {
+                          hideDebugPanel()
+                      } else {
+                          showDebugPanel()
+                      }
+                  }
 
                   b.btnDebugClose.setOnClickListener { hideDebugPanel() }
                   b.btnDebugRefresh.setOnClickListener {
@@ -3334,7 +3309,7 @@ jobs:
                   b.rightControls.visibility = View.GONE
                   b.btnSleepTimer.visibility = View.GONE
                   b.leftControls.visibility = View.GONE
-                  b.btnBug.visibility = View.GONE
+                  // btnBug не скрываем, чтобы можно было нажать второй раз
                   b.debugText.text = buildDebugText()
                   b.btnDebugClose.requestFocus()
                   startDebugUpdater()
@@ -3423,8 +3398,7 @@ jobs:
                   sb.appendLine("  stream: ${streamPrefs.all.size}/120")
                   val thumbPrefs = getSharedPreferences("thumb_cache", MODE_PRIVATE)
                   sb.appendLine("  thumb: ${thumbPrefs.all.size}/30")
-                  val coilDisk = File(cacheDir, "image_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                  sb.appendLine("  coil: ${formatBytes(coilDisk)} / 3 МБ")
+                  sb.appendLine("  coil: отключен (RAM)")
                   val logFile = File(filesDir, "app.log")
                   sb.appendLine("  log: ${formatBytes(if (logFile.exists()) logFile.length() else 0L)} / 200 КБ")
                   val totalFiles = filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
@@ -3573,9 +3547,15 @@ jobs:
                       onUserInteraction()
                   }
                   if (b.debugPanel.visibility == View.VISIBLE) {
-                      if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_BACK) {
-                          hideDebugPanel()
-                          return true
+                      if (event.action == KeyEvent.ACTION_DOWN) {
+                          if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                              hideDebugPanel()
+                              return true
+                          }
+                          if (currentFocus?.id == R.id.btnBug && (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER)) {
+                              hideDebugPanel()
+                              return true
+                          }
                       }
                       return super.dispatchKeyEvent(event)
                   }
@@ -3908,17 +3888,17 @@ jobs:
           body: |
             ## Сборка #${{ github.run_number }}
 
-            🎯 **Исправлен баг с раздуванием кэша картинок (Coil)**
+            🎯 **Глобальный фикс кэша и улучшение жучка**
 
-            **Кэш и память:**
-            - Исправлен баг: Coil сохранял на диск оригиналы картинок (огромные файлы), игнорируя лимит. Теперь включен `Precision.EXACT`, картинки сжимаются перед записью на диск. Лимит в 3 МБ будет соблюдаться строго.
-            - При запуске приложение принудительно очистит старый раздутый кэш.
-            - `yt-dlp` изолирован в папке `ytdlp_tmp`, которая удаляется сразу после резолва.
+            **Кэш картинок (Coil):**
+            - Создание `ImageLoader` перенесено на уровень `Application` — теперь единый загрузчик для всего приложения.
+            - Дисковый кэш **полностью отключен** (`diskCache(null)`). Картинки хранятся только в оперативной памяти (8 МБ). На диск не пишется ни байта.
+            - При запуске и очистке кэша папка `image_cache` принудительно удаляется, чтобы стереть старые раздутые файлы.
 
-            **Интерфейс:**
-            - Плашка «⏳ Загрузка потока…» появляется мгновенно при старте канала.
-            - Кнопка 🐛 в плеере работает с пульта.
-            - Человеческие тексты ошибок.
+            **Кнопка 🐛 (Toggle):**
+            - Жучок больше не исчезает при открытии панели.
+            - Нажатие на жучок работает как переключатель: первый раз — открыть, второй раз — закрыть.
+            - Кнопка «Назад» на пульте тоже продолжает закрывать панель.
 
             📦 Скачайте APK и установите поверх старой.
           files: ${{ steps.apk.outputs.file }}
